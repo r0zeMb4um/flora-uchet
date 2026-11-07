@@ -397,3 +397,26 @@ test('неизвестный способ оплаты не теряется м�
 test('стоимость потерь не выходит за пределы точности', () => {
   assert.throws(() => Calc.lossCost(9e15, 10), { code: 'NOT_INTEGER' });
 });
+
+// ---------- Вторая, глубокая проверка ----------
+
+test('дробные слагаемые не прячутся в сумме (0,5 + 0,5 = 1)', () => {
+  assert.throws(() => Calc.shiftRevenue([
+    { total: 100, discount_amount: 0.5 }, { total: 100, discount_amount: 0.5 }
+  ]), { code: 'NOT_INTEGER' });
+});
+
+test('платёж с неизвестным видом ловится в любой функции, даже если он другим способом оплаты', () => {
+  const p = [{ kind: 'gift', method: 'card', amount: 100 }];
+  assert.throws(() => Calc.cashCalc(0, p, []), { code: 'BAD_PAYMENT_KIND' });
+  assert.throws(() => Calc.cardTotal([{ kind: 'gift', method: 'cash', amount: 100 }]), { code: 'BAD_PAYMENT_KIND' });
+});
+
+test('проверка чека отклоняет неизвестный способ оплаты', () => {
+  assert.throws(() => Calc.checkReceiptBalance(100, [{ method: 'kaspi', amount: 100 }], 0, 0), { code: 'BAD_PAYMENT_METHOD' });
+});
+
+test('движение товара и долг без позиции / покупателя — отказ', () => {
+  assert.throws(() => Calc.stockBalance([{ qty: 5 }]), { code: 'BAD_ITEM' });
+  assert.throws(() => Calc.customerDebts([{ amount: 5 }]), { code: 'BAD_CUSTOMER' });
+});

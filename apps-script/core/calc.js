@@ -42,8 +42,11 @@ var Calc = (function () {
 
   function sum(list, pick) {
     var total = 0;
-    for (var i = 0; i < list.length; i++) total += pick ? pick(list[i]) : list[i];
-    return assertInt(total, 'сумма');
+    for (var i = 0; i < list.length; i++) {
+      total += assertInt(pick ? pick(list[i]) : list[i], 'слагаемое');
+      assertInt(total, 'сумма');
+    }
+    return total;
   }
 
   // ---------- 0. Округление ----------
@@ -104,7 +107,12 @@ var Calc = (function () {
   function checkReceiptBalance(total, payments, debtAmount, preorderUnpaid) {
     assertPositive(total, 'итого');
     var paid = 0;
-    for (var i = 0; i < payments.length; i++) paid += assertPositive(payments[i].amount, 'оплата');
+    for (var i = 0; i < payments.length; i++) {
+      if (!PAYMENT_METHODS[payments[i].method]) {
+        throw calcError('BAD_PAYMENT_METHOD', 'Неизвестный способ оплаты: ' + payments[i].method + ' (только cash или card)');
+      }
+      paid = assertInt(paid + assertPositive(payments[i].amount, 'оплата'), 'сумма оплат');
+    }
     var debt = assertNonNegative(debtAmount || 0, 'в долг');
     var unpaid = assertNonNegative(preorderUnpaid || 0, 'остаток предзаказа');
     if (paid + debt + unpaid !== total) {
@@ -164,8 +172,8 @@ var Calc = (function () {
       if (each[s.staff_id]) throw calcError('DUPLICATE_STAFF', 'Флорист указан в смене дважды: ' + s.staff_id);
       var rate = assertNonNegative(s.shift_rate, 'ставка');
       var pct = floristPct(revenue, s.pct_bp, n);
-      each[s.staff_id] = { rate: rate, pct: pct, total: rate + pct };
-      total += rate + pct;
+      each[s.staff_id] = { rate: rate, pct: pct, total: assertInt(rate + pct, 'ЗП') };
+      total = assertInt(total + rate + pct, 'ЗП всего');
     }
     return { each: each, total: total };
   }
@@ -188,11 +196,11 @@ var Calc = (function () {
       if (!PAYMENT_METHODS[p.method]) {
         throw calcError('BAD_PAYMENT_METHOD', 'Неизвестный способ оплаты: ' + p.method + ' (только cash или card)');
       }
-      if (p.method !== method) continue;
       assertPositive(p.amount, 'платёж');
-      if (p.kind === 'refund') refundSum += p.amount;
-      else if (PAYMENT_IN[p.kind]) inSum += p.amount;
-      else throw calcError('BAD_PAYMENT_KIND', 'Неизвестный вид платежа: ' + p.kind);
+      if (p.kind !== 'refund' && !PAYMENT_IN[p.kind]) throw calcError('BAD_PAYMENT_KIND', 'Неизвестный вид платежа: ' + p.kind);
+      if (p.method !== method) continue;
+      if (p.kind === 'refund') refundSum = assertInt(refundSum + p.amount, 'возвраты');
+      else inSum = assertInt(inSum + p.amount, 'поступления');
     }
     return { in: inSum, refund: refundSum };
   }
@@ -210,10 +218,10 @@ var Calc = (function () {
     for (var i = 0; i < cashOps.length; i++) {
       var op = cashOps[i];
       assertPositive(op.amount, 'расход из кассы');
-      if (CASH_OUT_BEFORE_COUNT[op.type]) out += op.amount;
+      if (CASH_OUT_BEFORE_COUNT[op.type]) out = assertInt(out + op.amount, 'расходы');
       else if (!CASH_OUT_AFTER_COUNT[op.type]) throw calcError('BAD_CASH_OP', 'Неизвестный тип расхода: ' + op.type);
     }
-    return openCash + cash.in - cash.refund - out;
+    return assertInt(openCash + cash.in - cash.refund - out, 'расчёт кассы');
   }
 
   /** Безнал за смену для сверки с Kaspi = оплаты безналом − возвраты безналом. */
@@ -260,7 +268,8 @@ var Calc = (function () {
     for (var i = 0; i < moves.length; i++) {
       var m = moves[i];
       assertInt(m.qty, 'количество');
-      bal[m.item_id] = (bal[m.item_id] || 0) + m.qty;
+      if (typeof m.item_id !== 'string' || !m.item_id) throw calcError('BAD_ITEM', 'Движение товара без позиции');
+      bal[m.item_id] = assertInt((bal[m.item_id] || 0) + m.qty, 'остаток');
     }
     return bal;
   }
@@ -317,7 +326,8 @@ var Calc = (function () {
     for (var i = 0; i < debtMoves.length; i++) {
       var m = debtMoves[i];
       assertInt(m.amount, 'сумма долга');
-      debts[m.customer_id] = (debts[m.customer_id] || 0) + m.amount;
+      if (typeof m.customer_id !== 'string' || !m.customer_id) throw calcError('BAD_CUSTOMER', 'Долг без покупателя');
+      debts[m.customer_id] = assertInt((debts[m.customer_id] || 0) + m.amount, 'долг');
     }
     return debts;
   }
