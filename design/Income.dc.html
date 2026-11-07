@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Приход товара</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F4A52}a:hover{color:#163840}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F2EE; font-family: 'Jost', Arial, sans-serif; color: #18272B; display: flex; flex-direction: column; overflow: hidden">
+  <div style="height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #E3DED6">
+    <button type="button" aria-label="Назад" style="border: none; background: none; padding: 0; min-width: 44px; min-height: 44px; display: flex; align-items: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F4A52" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <div style="font-size: 16px; font-weight: 600">Приход</div>
+    <div style="width: 44px"></div>
+  </div>
+
+  <div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5B6B6E">Поставщик
+      <button type="button" style="height: 48px; border: 1px solid #E3DED6; border-radius: 12px; background: #FFFFFF; font-family: inherit; font-size: 16px; color: #18272B; text-align: left; padding: 0 14px; display: flex; align-items: center; justify-content: space-between">Флора-опт
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B6B6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </label>
+
+    <div style="background: #FFFFFF; border: 1px solid #E3DED6; border-radius: 16px; overflow: hidden">
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 104px; gap: 8px; padding: 10px 14px; font-size: 12px; color: #5B6B6E; border-bottom: 1px solid #E3DED6">
+        <span>Позиция</span><span style="text-align: right">Кол-во</span><span style="text-align: right">Сумма, ₸</span>
+      </div>
+      <sc-for list="{{rows}}" as="row" hint-placeholder-count="3">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 104px; gap: 8px; padding: 12px 14px; align-items: center; border-bottom: 1px solid #F0ECE6">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 15px; font-weight: 500">{{row.name}}</span>
+            <span style="font-size: 12px; color: #5B6B6E">{{row.unit}}</span>
+          </div>
+          <span style="text-align: right; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums">{{row.qty}}</span>
+          <span style="text-align: right; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums">{{row.sum}}</span>
+        </div>
+      </sc-for>
+      <button type="button" style="width: 100%; height: 52px; border: none; background: #FFFFFF; font-family: inherit; font-size: 15px; font-weight: 600; color: #1F4A52; display: flex; align-items: center; justify-content: center; gap: 6px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1F4A52" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Добавить строку
+      </button>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px">
+      <span style="font-size: 15px; color: #5B6B6E">Итого по накладной</span>
+      <span style="font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums">74 000 ₸</span>
+    </div>
+
+    <div style="background: #F5E9DF; border-radius: 12px; padding: 12px 14px; font-size: 14px; line-height: 1.4; color: #5E3820">Сверьте итог с бумажной накладной. Касса смены не меняется: поставщику платит владелица.</div>
+
+    <button type="button" style="height: 44px; border: 1px dashed #9A5A34; border-radius: 12px; background: transparent; font-family: inherit; font-size: 15px; color: #9A5A34">Нет в каталоге? Новая позиция</button>
+  </div>
+
+  <div style="padding: 12px 16px 20px; background: #FFFFFF; border-top: 1px solid #E3DED6">
+    <button type="button" style="width: 100%; height: 52px; border: none; border-radius: 12px; background: #1F4A52; color: #FFFFFF; font-family: inherit; font-size: 17px; font-weight: 600">Провести приход 74 000 ₸</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      rows: [
+        { name: 'Роза красная 60 см', unit: '650 ₸ за шт', qty: '50', sum: '32 500' },
+        { name: 'Роза белая 60 см', unit: '650 ₸ за шт', qty: '50', sum: '32 500' },
+        { name: 'Эвкалипт', unit: '300 ₸ за шт', qty: '30', sum: '9 000' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

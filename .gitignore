@@ -1,0 +1,13 @@
+# Архив стартового пакета — копия того, что уже лежит в папке
+flora-uchet.zip
+
+# Секреты и локальные настройки clasp — никогда не в git
+.clasprc.json
+.env
+*.secret
+
+# Node
+node_modules/
+
+# ID проекта Apps Script (репозиторий публичный — решение D15)
+.clasp.json

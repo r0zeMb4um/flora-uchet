@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Итог смены</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F4A52}a:hover{color:#163840}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F2EE; font-family: 'Jost', Arial, sans-serif; color: #18272B; display: flex; flex-direction: column; overflow: hidden">
+  <div style="height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #E3DED6">
+    <button type="button" aria-label="Назад" style="border: none; background: none; padding: 0; min-width: 44px; min-height: 44px; display: flex; align-items: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F4A52" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <div style="font-size: 16px; font-weight: 600">Закрытие смены</div>
+    <div style="width: 44px"></div>
+  </div>
+
+  <div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+    <div style="background: #FFFFFF; border: 1px solid #E3DED6; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 13px; color: #5B6B6E">Сверка кассы</div>
+      <div style="display: flex; justify-content: space-between; font-size: 15px"><span>Расчёт</span><span style="font-variant-numeric: tabular-nums">32 500 ₸</span></div>
+      <div style="display: flex; justify-content: space-between; font-size: 15px"><span>Пересчитали</span><span style="font-variant-numeric: tabular-nums">32 498 ₸</span></div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid #E3DED6; padding-top: 8px">
+        <span style="font-size: 16px; font-weight: 600; color: #B3261E">Недостача</span>
+        <span style="font-size: 22px; font-weight: 600; color: #B3261E; font-variant-numeric: tabular-nums">−2 ₸</span>
+      </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E3DED6; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 13px; color: #5B6B6E">Зарплата — возьмите из кассы</div>
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <span style="display: flex; flex-direction: column"><span style="font-size: 16px; font-weight: 500">Анна</span><span style="font-size: 12px; color: #5B6B6E">5 000 + 1 049 (3% от половины выручки)</span></span>
+        <span style="font-size: 18px; font-weight: 600; color: #9A5A34; font-variant-numeric: tabular-nums">6 049 ₸</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <span style="display: flex; flex-direction: column"><span style="font-size: 16px; font-weight: 500">Мира</span><span style="font-size: 12px; color: #5B6B6E">5 000 + 1 049 (3% от половины выручки)</span></span>
+        <span style="font-size: 18px; font-weight: 600; color: #9A5A34; font-variant-numeric: tabular-nums">6 049 ₸</span>
+      </div>
+    </div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E3DED6; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+      <label style="display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 16px; font-weight: 500">Владелица забирает
+        <input type="text" inputmode="numeric" value="10 000 ₸" style="width: 140px; height: 46px; border: 2px solid #1F4A52; border-radius: 10px; padding: 0 12px; text-align: right; font-family: inherit; font-size: 18px; font-weight: 600; color: #18272B; font-variant-numeric: tabular-nums">
+      </label>
+      <div style="font-size: 13px; color: #5B6B6E">Можно забрать до 15 400 ₸, чтобы в кассе остался размен 5 000 ₸</div>
+    </div>
+
+    <div style="background: #1F4A52; color: #FFFFFF; border-radius: 16px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center">
+      <span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">Останется на следующую смену</span><span style="font-size: 12px; color: #CFE0DF">в том числе размен 5 000 ₸</span></span>
+      <span style="font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums">10 400 ₸</span>
+    </div>
+  </div>
+
+  <div style="padding: 12px 16px 20px; background: #FFFFFF; border-top: 1px solid #E3DED6">
+    <button type="button" style="width: 100%; height: 52px; border: none; border-radius: 12px; background: #1F4A52; color: #FFFFFF; font-family: inherit; font-size: 17px; font-weight: 600">Закрыть смену и отправить отчёт</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

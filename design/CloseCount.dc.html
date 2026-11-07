@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пересчёт кассы</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:#1F4A52}a:hover{color:#163840}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F2EE; font-family: 'Jost', Arial, sans-serif; color: #18272B; display: flex; flex-direction: column; overflow: hidden">
+  <div style="height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: #FFFFFF; border-bottom: 1px solid #E3DED6">
+    <button type="button" aria-label="Назад" style="border: none; background: none; padding: 0; min-width: 44px; min-height: 44px; display: flex; align-items: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F4A52" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <div style="font-size: 16px; font-weight: 600">Закрытие смены</div>
+    <div style="width: 44px"></div>
+  </div>
+
+  <div style="padding: 16px 16px 0; display: flex; flex-direction: column; gap: 8px">
+    <div style="font-size: 13px; color: #5B6B6E">Шаг 3 из 7</div>
+    <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px">
+      <div style="height: 4px; border-radius: 2px; background: #1F4A52"></div>
+      <div style="height: 4px; border-radius: 2px; background: #1F4A52"></div>
+      <div style="height: 4px; border-radius: 2px; background: #1F4A52"></div>
+      <div style="height: 4px; border-radius: 2px; background: #D9D3C9"></div>
+      <div style="height: 4px; border-radius: 2px; background: #D9D3C9"></div>
+      <div style="height: 4px; border-radius: 2px; background: #D9D3C9"></div>
+      <div style="height: 4px; border-radius: 2px; background: #D9D3C9"></div>
+    </div>
+  </div>
+
+  <div style="flex: 1; padding: 20px 16px 0; display: flex; flex-direction: column; gap: 12px">
+    <h1 style="margin: 0; font-size: 26px; font-weight: 600; line-height: 1.2">Сколько наличных в кассе?</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.45; color: #5B6B6E">Пересчитайте все купюры и монеты, включая размен. Расчётную сумму бот покажет только после ввода.</p>
+
+    <div style="margin-top: 8px; background: #FFFFFF; border: 2px solid #1F4A52; border-radius: 16px; height: 84px; display: flex; align-items: center; justify-content: flex-end; padding: 0 20px; font-size: 40px; font-weight: 600; font-variant-numeric: tabular-nums">32 498 ₸</div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px">
+      <sc-for list="{{keys}}" as="k" hint-placeholder-count="12">
+        <button type="button" aria-label="{{k.label}}" style="height: 56px; border: none; border-radius: 12px; background: {{k.bg}}; font-family: inherit; font-size: 24px; font-weight: 500; color: #18272B">{{k.text}}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="padding: 12px 16px 20px; background: #FFFFFF; border-top: 1px solid #E3DED6; margin-top: 16px">
+    <button type="button" style="width: 100%; height: 52px; border: none; border-radius: 12px; background: #1F4A52; color: #FFFFFF; font-family: inherit; font-size: 17px; font-weight: 600">Сверить</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const d = (t) => ({ text: t, label: t, bg: '#FFFFFF' });
+    return {
+      keys: [d('1'), d('2'), d('3'), d('4'), d('5'), d('6'), d('7'), d('8'), d('9'),
+        { text: '000', label: 'Три нуля', bg: '#E9E5DE' }, d('0'), { text: '⌫', label: 'Стереть', bg: '#E9E5DE' }]
+    };
+  }
+}
+</script>
+</body>
+</html>
