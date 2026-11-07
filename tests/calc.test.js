@@ -122,13 +122,15 @@ test('эталонная смена №214: все цифры совпадают
     const close = Calc.closeShift({
       counted: s.counted,
       calc_cash: calcCash,
-      payroll_total: pay.total,
+      payroll_each: { s_anna: pay.each.s_anna.total, s_mira: pay.each.s_mira.total },
       change_fund: g.settings.change_fund,
       close_withdrawal: s.closeWithdrawal
     });
     assert.equal(close.cash_diff, exp.cash_diff);
     assert.equal(close.can_take_above_change_fund, exp.can_take_above_change_fund);
     assert.equal(close.next_cash, exp.next_cash);
+    assert.equal(close.payroll_paid_total, exp.payroll_total);
+    assert.equal(close.payroll_unpaid_total, 0);
   });
 
   await t.test('склад: остаток до и после инвентаризации, брак, ниже минимума', () => {
@@ -290,22 +292,19 @@ test('касса: расхождение при приёме смены', () => 
 });
 
 test('закрытие: излишек, подсказка не уходит в минус, нельзя забрать больше, чем есть', () => {
-  const ok = Calc.closeShift({ counted: 20100, calc_cash: 20000, payroll_total: 12000, change_fund: 5000, close_withdrawal: 0 });
+  const two = { a: 6000, b: 6000 };
+  const ok = Calc.closeShift({ counted: 20100, calc_cash: 20000, payroll_each: two, change_fund: 5000, close_withdrawal: 0 });
   assert.equal(ok.cash_diff, 100);
   assert.equal(ok.can_take_above_change_fund, 3100);
   assert.equal(ok.next_cash, 8100);
 
-  const low = Calc.closeShift({ counted: 14000, calc_cash: 14000, payroll_total: 12000, change_fund: 5000 });
+  const low = Calc.closeShift({ counted: 14000, calc_cash: 14000, payroll_each: two, change_fund: 5000 });
   assert.equal(low.can_take_above_change_fund, 0);
   assert.equal(low.next_cash, 2000);
 
   assert.throws(
-    () => Calc.closeShift({ counted: 14000, calc_cash: 14000, payroll_total: 12000, change_fund: 5000, close_withdrawal: 2001 }),
+    () => Calc.closeShift({ counted: 14000, calc_cash: 14000, payroll_each: two, change_fund: 5000, close_withdrawal: 2001 }),
     { code: 'WITHDRAWAL_TOO_BIG' }
-  );
-  assert.throws(
-    () => Calc.closeShift({ counted: 10000, calc_cash: 10000, payroll_total: 12000, change_fund: 5000 }),
-    { code: 'NOT_ENOUGH_FOR_PAYROLL' }
   );
 });
 
@@ -419,4 +418,24 @@ test('проверка чека отклоняет неизвестный спо
 test('движение товара и долг без позиции / покупателя — отказ', () => {
   assert.throws(() => Calc.stockBalance([{ qty: 5 }]), { code: 'BAD_ITEM' });
   assert.throws(() => Calc.customerDebts([{ amount: 5 }]), { code: 'BAD_CUSTOMER' });
+});
+
+// ---------- Решение D18: денег на ЗП не хватает ----------
+
+test('не хватает наличных на ЗП: выдаём сколько есть, остальное — к доплате', () => {
+  const r = Calc.closeShift({ counted: 9701, calc_cash: 9701, payroll_each: { anna: 6049, mira: 6049 }, change_fund: 5000 });
+  assert.deepEqual(r.payroll_paid_each, { anna: 4851, mira: 4850 }); // 4 850,5 → 4 851, остаток второй
+  assert.deepEqual(r.payroll_unpaid_each, { anna: 1198, mira: 1199 });
+  assert.equal(r.payroll_paid_total, 9701);
+  assert.equal(r.payroll_unpaid_total, 2397);
+  assert.equal(r.next_cash, 0);
+  assert.throws(() => Calc.closeShift({ counted: 9701, calc_cash: 0, payroll_each: { anna: 6049, mira: 6049 }, change_fund: 0, close_withdrawal: 1 }), { code: 'WITHDRAWAL_TOO_BIG' });
+});
+
+test('не хватает на ЗП: один флорист, пустая касса, разные ЗП', () => {
+  assert.deepEqual(Calc.closeShift({ counted: 2300, calc_cash: 0, payroll_each: { anna: 7000 }, change_fund: 0 }).payroll_unpaid_each, { anna: 4700 });
+  assert.deepEqual(Calc.closeShift({ counted: 0, calc_cash: 0, payroll_each: { anna: 7000 }, change_fund: 0 }).payroll_unpaid_each, { anna: 7000 });
+  const r = Calc.closeShift({ counted: 1000, calc_cash: 0, payroll_each: { a: 3000, b: 1000 }, change_fund: 0 });
+  assert.deepEqual(r.payroll_paid_each, { a: 750, b: 250 });
+  assert.throws(() => Calc.closeShift({ counted: 1, calc_cash: 0, payroll_each: {}, change_fund: 0 }), { code: 'BAD_FLORISTS_COUNT' });
 });

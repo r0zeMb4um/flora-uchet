@@ -84,15 +84,23 @@ test('касса и безнал: каждый тенге учтён ровно 
   }
 });
 
-test('закрытие смены: пересчёт = ЗП + изъятие + остаток на следующую смену', () => {
+test('закрытие смены: пересчёт = выданная ЗП + изъятие + остаток; выдано + к доплате = ЗП', () => {
   for (let i = 0; i < RUNS; i++) {
     const counted = int(0, 1_000_000);
-    const pay = int(0, counted);
+    const each = { a: int(0, 600000), b: int(0, 600000) };
+    const due = each.a + each.b;
+    const pay = Math.min(due, counted);
     const withdrawal = int(0, counted - pay);
     const calc = int(-100000, 1_000_000);
     const fund = int(0, 20000);
-    const r = Calc.closeShift({ counted, calc_cash: calc, payroll_total: pay, change_fund: fund, close_withdrawal: withdrawal });
-    assert.equal(r.next_cash + pay + withdrawal, counted);
+    const r = Calc.closeShift({ counted, calc_cash: calc, payroll_each: each, change_fund: fund, close_withdrawal: withdrawal });
+    assert.equal(r.next_cash + r.payroll_paid_total + withdrawal, counted);
+    assert.equal(r.payroll_paid_total, pay);
+    assert.equal(r.payroll_paid_total + r.payroll_unpaid_total, due);
+    for (const id of ['a', 'b']) {
+      assert.equal(r.payroll_paid_each[id] + r.payroll_unpaid_each[id], each[id]);
+      assert.ok(r.payroll_paid_each[id] >= 0 && r.payroll_unpaid_each[id] >= 0, JSON.stringify([each, counted, r]));
+    }
     assert.equal(r.cash_diff, counted - calc);
     assert.ok(r.next_cash >= 0 && r.can_take_above_change_fund >= 0);
   }

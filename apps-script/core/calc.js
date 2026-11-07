@@ -237,25 +237,59 @@ var Calc = (function () {
 
   /**
    * Закрытие смены после пересчёта вслепую.
-   * Возвращает расхождение, подсказку «можно забрать сверх размена» и остаток на следующую смену.
+   * p: { counted, calc_cash, payroll_each: { staff_id: ЗП }, change_fund, close_withdrawal }
+   *
+   * Если наличных меньше, чем ЗП (решение D18), из кассы выдаётся сколько есть —
+   * пропорционально ЗП каждого, — а недоданное показывается владелице как «ЗП к доплате».
+   * Доплату потом выдают отдельно (касса, тип pay_adjust).
    */
   function closeShift(p) {
     var counted = assertNonNegative(p.counted, 'пересчёт');
     var calc = assertInt(p.calc_cash, 'расчёт кассы');
-    var pay = assertNonNegative(p.payroll_total, 'ЗП');
     var fund = assertNonNegative(p.change_fund, 'размен');
     var withdrawal = assertNonNegative(p.close_withdrawal || 0, 'изъятие при закрытии');
-
-    if (pay > counted) {
-      throw calcError('NOT_ENOUGH_FOR_PAYROLL', 'В кассе ' + counted + ' ₸, а зарплата ' + pay + ' ₸ — не хватает денег');
+    var ids = Object.keys(p.payroll_each || {});
+    if (ids.length < 1 || ids.length > 2) {
+      throw calcError('BAD_FLORISTS_COUNT', 'В смене может быть 1 или 2 флориста, получено: ' + ids.length);
     }
-    var nextCash = counted - pay - withdrawal;
+    var due = {};
+    var payTotal = 0;
+    ids.forEach(function (id) {
+      due[id] = assertNonNegative(p.payroll_each[id], 'ЗП');
+      payTotal = assertInt(payTotal + due[id], 'ЗП всего');
+    });
+
+    // Сколько выдаём из кассы каждому.
+    var paid = {};
+    if (payTotal <= counted) {
+      ids.forEach(function (id) { paid[id] = due[id]; });
+    } else {
+      var given = 0;
+      ids.forEach(function (id, i) {
+        paid[id] = i === ids.length - 1 ? counted - given : roundDiv(counted * due[id], payTotal);
+        given += paid[id];
+      });
+    }
+    var paidTotal = 0;
+    var unpaid = {};
+    var unpaidTotal = 0;
+    ids.forEach(function (id) {
+      paidTotal += paid[id];
+      unpaid[id] = due[id] - paid[id];
+      unpaidTotal += unpaid[id];
+    });
+
+    var nextCash = counted - paidTotal - withdrawal;
     if (nextCash < 0) {
-      throw calcError('WITHDRAWAL_TOO_BIG', 'Нельзя забрать больше, чем осталось в кассе после зарплаты: ' + (counted - pay) + ' ₸');
+      throw calcError('WITHDRAWAL_TOO_BIG', 'Нельзя забрать больше, чем осталось в кассе после зарплаты: ' + (counted - paidTotal) + ' ₸');
     }
     return {
       cash_diff: counted - calc,
-      can_take_above_change_fund: Math.max(0, counted - pay - fund),
+      payroll_paid_each: paid,
+      payroll_paid_total: paidTotal,
+      payroll_unpaid_each: unpaid,
+      payroll_unpaid_total: unpaidTotal,
+      can_take_above_change_fund: Math.max(0, counted - paidTotal - fund),
       next_cash: nextCash
     };
   }
