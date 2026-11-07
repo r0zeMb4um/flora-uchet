@@ -1,0 +1,19 @@
+# Тесты при каждой отправке в GitHub. Красный тест = выкладка запрещена.
+name: Тесты
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: node scripts/check-gas.mjs
+      - name: Нет секретов в коде
+        run: |
+          if grep -rEn '[0-9]{8,10}:[A-Za-z0-9_-]{35}' --include='*.js' --include='*.json' --include='*.md' . ; then
+            echo 'Похоже на токен бота в коде!'; exit 1; fi

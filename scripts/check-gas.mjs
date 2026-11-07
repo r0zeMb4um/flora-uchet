@@ -16,7 +16,7 @@ const all = [];
 const files = [...first, ...all.filter((f) => !first.includes(f)).sort()];
 const ctx = vm.createContext({ console });
 for (const f of files) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
-const need = ['Calc', 'Ops', 'Posting', 'Schema', 'SheetsStore', 'Tg', 'Webhook', 'OpenShiftFlow', 'Notify', 'doPost', 'doGet', 'setup', 'connectBot', 'nowIso'];
+const need = ['Auth', 'MiniApi', 'Calc', 'Ops', 'Posting', 'Schema', 'SheetsStore', 'Tg', 'Webhook', 'OpenShiftFlow', 'Notify', 'doPost', 'doGet', 'setup', 'connectBot', 'nowIso'];
 const missing = need.filter((n) => vm.runInContext('typeof ' + n, ctx) === 'undefined');
 if (missing.length) { console.error('Не определены:', missing.join(', ')); process.exit(1); }
 console.log('OK: загружено файлов', files.length, '— все глобальные имена на месте');

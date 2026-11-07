@@ -10,7 +10,8 @@ function doPost(e) {
     data = null;
   }
   if (data && data.update_id !== undefined) return Webhook.handle(e, data);
-  return jsonOut_({ ok: false, error: { code: 'NOT_READY', message: 'API Mini App подключается на этапе C' } });
+  if (data && data.initData !== undefined) return MiniApi.handle(data);
+  return jsonOut_({ ok: false, error: { code: 'BAD_REQUEST', message: 'Неверный запрос' } });
 }
 
 function doGet(e) {
