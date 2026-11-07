@@ -105,6 +105,7 @@
 | actor_staff_id | str | s_anna |
 | status | enum | pending / posted / failed |
 | created_at, posted_at | datetime | |
+| plan_json | str | план записи операции (что дописать, что поменять, прежние значения). Повтор `pending` применяет сохранённый план, а не строит новый |
 | result_json | str | ответ, который вернули при проведении (для «уже проведено») |
 
 Правило: строки операции в других листах пишутся с её `op_id`; `status=posted` ставится последним. Всё, что считает отчёты и остатки, учитывает только строки с `op_id`, у которого `ops_log.status = posted`.
@@ -114,6 +115,7 @@
 | Колонка | Тип | Пример (эталон) |
 | --- | --- | --- |
 | shift_id | str | sh214 |
+| shift_no | int | 214 — номер смены на точке |
 | client_id, point_id | str | |
 | shift_date | date | 2026-11-06 |
 | florist_ids | str (через запятую) | s_anna,s_mira |
@@ -124,7 +126,8 @@
 | calc_cash | int ₸ | 32500 |
 | counted_cash | int ₸ | 32498 |
 | cash_diff | int ₸ | −2 = counted − calc |
-| payroll_total | int ₸ | 12098 |
+| payroll_total | int ₸ | 12098 — начислено |
+| payroll_unpaid | int ₸ | 0 — к доплате, если наличных не хватило (D18) |
 | close_withdrawal | int ₸ | 10000 |
 | next_cash | int ₸ | 10400 = counted − payroll − close_withdrawal |
 | status | enum | open / closed |
@@ -144,6 +147,7 @@
 | Колонка | Тип | Пример |
 | --- | --- | --- |
 | receipt_id, op_id | str | |
+| receipt_no | int | номер чека в смене |
 | client_id, point_id, shift_id | str | |
 | type | enum | sale / bouquet / preorder |
 | price | int ₸ | цена, введённая флористом |
@@ -213,7 +217,7 @@
 | --- | --- | --- |
 | move_id, op_id | str | |
 | client_id, point_id, shift_id | str | |
-| type | enum | start / income / sale / defect / replace / adjust |
+| type | enum | start / income / sale / defect / replace / adjust / cancel (возврат на склад при отмене чека) |
 | item_id | str | |
 | qty | int (со знаком) | +50 / −7 |
 | cost_sum | int ₸ | сумма по накладной за строку (только income) |
@@ -236,7 +240,7 @@
 | cash_id, op_id | str | |
 | client_id, point_id, shift_id | str | |
 | type | enum | delivery / other / rate / pct / pay_adjust / withdrawal_day / withdrawal_close (аренды нет — D11) |
-| amount | int ₸ | > 0, всегда расход из кассы |
+| amount | int ₸ | > 0, всегда расход из кассы. До пересчёта (входят в расчёт кассы): delivery, other, withdrawal_day, pay_adjust. После пересчёта: rate, pct, withdrawal_close |
 | staff_id | str | для rate, pct и pay_adjust (доплата ЗП после исправления, D7) |
 | comment | str | |
 

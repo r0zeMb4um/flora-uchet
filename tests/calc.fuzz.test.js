@@ -78,7 +78,7 @@ test('касса и безнал: каждый тенге учтён ровно 
     const cashBack = sumWhere((p) => p.method === 'cash' && p.kind === 'refund');
     const cardIn = sumWhere((p) => p.method === 'card' && p.kind !== 'refund');
     const cardBack = sumWhere((p) => p.method === 'card' && p.kind === 'refund');
-    const before = ops.filter((o) => ['delivery', 'other', 'withdrawal_day'].includes(o.type)).reduce((s, o) => s + o.amount, 0);
+    const before = ops.filter((o) => ['delivery', 'other', 'withdrawal_day', 'pay_adjust'].includes(o.type)).reduce((s, o) => s + o.amount, 0);
     assert.equal(Calc.cashCalc(open, payments, ops), open + cashIn - cashBack - before);
     assert.equal(Calc.cardTotal(payments), cardIn - cardBack);
   }

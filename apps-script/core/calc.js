@@ -182,9 +182,9 @@ var Calc = (function () {
 
   var PAYMENT_IN = { sale: true, advance: true, topup: true, debt_repay: true };
   // Расходы из кассы, которые идут в «расчёт кассы» (до пересчёта).
-  var CASH_OUT_BEFORE_COUNT = { delivery: true, other: true, withdrawal_day: true };
+  var CASH_OUT_BEFORE_COUNT = { delivery: true, other: true, withdrawal_day: true, pay_adjust: true };
   // Выдаются после пересчёта и в расчёт не входят.
-  var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, pay_adjust: true, withdrawal_close: true };
+  var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, withdrawal_close: true };
 
   var PAYMENT_METHODS = { cash: true, card: true };
 
@@ -207,7 +207,7 @@ var Calc = (function () {
 
   /**
    * Расчёт кассы = наличные на начало + оплаты наличными − возвраты наличными
-   *              − доставки − прочие расходы − изъятия в течение смены.
+   *              − доставки − прочие расходы − изъятия в течение смены − доплаты ЗП (pay_adjust, D18).
    * Аренды в смене нет (решение D11). ЗП и изъятие при закрытии — после пересчёта.
    * payments: [{ kind, method, amount }] — только неотменённые; cashOps: [{ type, amount }]
    */
