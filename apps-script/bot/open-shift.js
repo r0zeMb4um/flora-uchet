@@ -57,7 +57,7 @@ var OpenShiftFlow = (function () {
         s.active === true && s.staff_id !== ctx.staff_id;
     });
     var rows = others.map(function (s) { return [{ text: 'Со мной ' + s.name, callback_data: 'oc:with:' + s.staff_id }]; });
-    rows.push([{ text: 'Работаю одна', callback_data: 'oc:alone' }]);
+    rows.push([{ text: 'Работаю без напарника', callback_data: 'oc:alone' }]);
     Tg.send(chatId, 'Принято наличных: <b>' + Tg.money(st.cash) + '</b>.\nКто работает с вами в смене?', {
       reply_markup: { inline_keyboard: rows }
     });

@@ -102,7 +102,7 @@ var Webhook = (function () {
     if (!inv) return Tg.send(chatId, 'Ссылка-приглашение недействительна или уже использована. Попросите у владелицы новую.');
     var staff = store.find('staff', 'staff_id', inv.staff_id)[0];
     Tg.send(chatId, 'Здравствуйте, ' + Tg.esc(staff ? staff.name : '') + '!\n\n' + Tg.esc(CONSENT_TEXT_V1), {
-      reply_markup: { inline_keyboard: [[{ text: 'Согласен(на)', callback_data: 'consent:' + token }]] }
+      reply_markup: { inline_keyboard: [[{ text: 'Согласен', callback_data: 'consent:' + token }]] }
     });
   }
 
