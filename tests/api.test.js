@@ -7,6 +7,8 @@ const crypto = require('node:crypto');
 global.Calc = require('../apps-script/core/calc.js');
 global.Ops = require('../apps-script/core/ops.js');
 global.Posting = require('../apps-script/core/posting.js');
+global.Summary = require('../apps-script/core/summary.js');
+global.Reports = require('../apps-script/bot/reports.js');
 const Auth = require('../apps-script/api/auth.js');
 const MiniApi = require('../apps-script/api/miniapp.js');
 const { memoryStore } = require('./helpers/memory-store.js');
@@ -178,4 +180,54 @@ test('касса: долг, предзаказы, брони, приход с н
   assert.equal(debtSale.refundable, 400, 'вернуть можно только реально оплаченное');
   post('refund', { receipt_id: debtSale.receipt_id, mode: 'money', method: 'cash', amount: 400 });
   assert.equal(MiniApi.dispatch(store, 777, { action: 'receipts' }, now).data.find((r) => r.total === 2400).refundable, 0);
+});
+
+// ---------- экраны владелицы ----------
+
+test('владелица в кассе: сегодня (с расчётом кассы), история, смена с чеками, исправление, сводка, должники, обезличивание', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const anna = (kind, payload) => MiniApi.dispatch(store, 777, { action: 'post', kind, op_id: 'op-own-' + String(++n).padStart(5, '0'), payload }, now);
+  const owner = (body) => MiniApi.dispatch(store, 1, body, now);
+  anna('sale', { items: [{ item_id: 'rose', qty: 5 }], price: 6000, payments: [{ method: 'cash', amount: 6000 }] });
+  anna('sale', { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [], debt_customer: { new_customer: { name: 'Айгуль' } } });
+
+  const today = owner({ action: 'owner_today' }).data;
+  assert.equal(today.shift.revenue, 7200);
+  assert.equal(today.shift.calc_cash, 21000, 'владелице расчёт кассы виден');
+  assert.ok(Array.isArray(today.below_min));
+
+  anna('inventory', { facts: { rose: 34 } });
+  anna('close_shift', { counted: 21000, expenses_confirmed: true });
+  const list = owner({ action: 'owner_shifts' }).data;
+  assert.deepEqual(list.map((s) => [s.shift_no, s.status, s.revenue, s.receipts, s.cash_diff]), [[1, 'closed', 7200, 2, 0]]);
+  const detail = owner({ action: 'owner_shift', shift_id: list[0].shift_id }).data;
+  assert.deepEqual(detail.receipts.map((r) => [r.receipt_no, r.total, r.cash, r.debt]), [[1, 6000, 6000, 0], [2, 1200, 0, 1200]]);
+  assert.match(detail.text, /ВЫРУЧКА: 7 200/);
+
+  // Исправление: второй чек снят — выручка 6 000, долг Айгуль 0, отмечено «исправлено».
+  const fix = owner({ action: 'post', kind: 'correction', op_id: 'op-fix-000001', payload: { receipt_id: detail.receipts[1].receipt_id, reason: 'ошибка' } });
+  assert.deepEqual(fix.notify.map((x) => x.kind), ['shift_report']);
+  const after = owner({ action: 'owner_shifts' }).data[0];
+  assert.deepEqual([after.revenue, after.corrected], [6000, true]);
+
+  const period = owner({ action: 'owner_period', from: '2026-11-01', to: '2026-11-07' }).data;
+  assert.equal(period.summary.revenue, 6000);
+  assert.equal(period.days.length, 7);
+  assert.equal(period.days.find((d) => d.date === '2026-11-07').revenue, 6000);
+
+  const cust = owner({ action: 'owner_customers' }).data;
+  assert.deepEqual(cust.map((c) => [c.name, c.debt]), [['Айгуль', 0]]);
+  owner({ action: 'post', kind: 'anonymize', op_id: 'op-anon-00001', payload: { customer_id: cust[0].customer_id } });
+  assert.deepEqual(owner({ action: 'owner_customers' }).data, []);
+});
+
+test('флорист не может открыть разделы владелицы и её операции; владелица — операции флориста', () => {
+  const { store, now } = shop();
+  for (const action of ['owner_today', 'owner_shifts', 'owner_period', 'owner_customers']) {
+    assert.throws(() => MiniApi.dispatch(store, 777, { action }, now), { code: 'FORBIDDEN' }, action);
+  }
+  assert.throws(() => MiniApi.dispatch(store, 777, { action: 'post', kind: 'correction', op_id: 'x'.repeat(10), payload: {} }, now), { code: 'FORBIDDEN' });
+  assert.throws(() => MiniApi.dispatch(store, 1, { action: 'post', kind: 'sale', op_id: 'y'.repeat(10), payload: {} }, now), { code: 'FORBIDDEN' });
+  assert.throws(() => MiniApi.dispatch(store, 1, { action: 'owner_period', from: 'вчера', to: 'сегодня' }, now), { code: 'BAD_INPUT' });
 });

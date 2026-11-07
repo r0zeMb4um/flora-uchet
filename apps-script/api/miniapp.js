@@ -98,10 +98,112 @@ var MiniApi = (function () {
       .slice(0, 100);
   }
 
+
+  // ---------- экраны владелицы (этап G) ----------
+
+  var OWNER_KINDS = { correction: true, anonymize: true };
+
+  function requireOwnerStaff(staff) {
+    if (staff.role !== 'owner') throw apiError('FORBIDDEN', 'Это раздел владелицы');
+  }
+  function names(view) {
+    var n = { items: {}, staff: {} };
+    view.rows('catalog').forEach(function (c) { n.items[c.item_id] = c.name; });
+    view.rows('staff').forEach(function (s) { n.staff[s.staff_id] = s.name; });
+    return n;
+  }
+
+  /** «Сегодня»: открытая смена целиком (владелице расчёт кассы виден), тревоги, ниже минимума. */
+  function ownerToday(store, staff, now) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var shift = view.openShift();
+    var rep = shift ? Ops.shiftReport(view, shift.shift_id) : null;
+    var st = Summary.stock(view);
+    var alerts = [];
+    if (rep && rep.open_diff) alerts.push('Расхождение при приёме смены: ' + rep.open_diff + ' ₸');
+    if (rep && rep.cancelled_count) alerts.push('Отменено чеков: ' + rep.cancelled_count);
+    var review = view.rows('catalog').filter(function (c) { return c.status === 'review'; }).length;
+    if (review) alerts.push('Новых позиций на проверке: ' + review + ' (чат → «Каталог»)');
+    return { me: { name: staff.name, role: staff.role }, shift: rep, names: names(view), below_min: st.below, alerts: alerts };
+  }
+
+  function ownerShifts(store, staff, now, limit) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var corrected = {};
+    view.rows('ops_log').forEach(function (o) { if (o.kind === 'correction') corrected[o.shift_id] = true; });
+    var staffNames = names(view).staff;
+    return view.rows('shifts').sort(function (a, b) { return b.shift_no - a.shift_no; }).slice(0, limit || 40).map(function (s) {
+      var rev = Calc.shiftRevenue(view.rows('receipts').filter(function (r) { return r.shift_id === s.shift_id; }));
+      return {
+        shift_id: s.shift_id, shift_no: s.shift_no, shift_date: s.shift_date, status: s.status,
+        florists: String(s.florist_ids).split(',').map(function (id) { return staffNames[id] || id; }),
+        revenue: rev.revenue, receipts: rev.receipts_count, cash_diff: s.status === 'closed' ? s.cash_diff : null,
+        corrected: !!corrected[s.shift_id]
+      };
+    });
+  }
+
+  function ownerShift(store, staff, now, shiftId) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var rep = Ops.shiftReport(view, shiftId);
+    var pays = view.rows('payments');
+    var debts = view.rows('debt_moves');
+    var receipts = view.rows('receipts').filter(function (r) { return r.shift_id === shiftId; })
+      .sort(function (a, b) { return a.receipt_no - b.receipt_no; }).map(function (r) {
+        var cash = 0, card = 0;
+        pays.forEach(function (p) {
+          if (p.receipt_id !== r.receipt_id || p.kind === 'refund' || p.shift_id !== shiftId) return;
+          if (p.method === 'cash') cash += p.amount; else card += p.amount;
+        });
+        var debt = debts.filter(function (m) { return m.receipt_id === r.receipt_id && m.shift_id === shiftId && m.amount > 0; })
+          .reduce(function (a, m) { return a + m.amount; }, 0);
+        return { receipt_id: r.receipt_id, receipt_no: r.receipt_no, time: String(r.created_at).slice(11, 16), type: r.type,
+          price: r.price, discount: r.discount_amount, total: r.total, cash: cash, card: card, debt: debt, status: r.status };
+      });
+    var shift = view.rows('shifts').filter(function (s) { return s.shift_id === shiftId; })[0];
+    return { report: rep, status: shift.status, receipts: receipts, names: names(view),
+      text: typeof Reports !== 'undefined' ? Reports.shiftText(rep, names(view)) : '' };
+  }
+
+  function ownerPeriod(store, staff, now, from, to) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var s = Summary.period(view, from, to);
+    var byDay = {};
+    view.rows('shifts').filter(function (x) { return x.shift_date >= from && x.shift_date <= to; }).forEach(function (x) {
+      var rev = Calc.shiftRevenue(view.rows('receipts').filter(function (r) { return r.shift_id === x.shift_id; })).revenue;
+      byDay[x.shift_date] = (byDay[x.shift_date] || 0) + rev;
+    });
+    var days = [];
+    for (var d = from; d <= to && days.length < 92; d = new Date(Date.parse(d + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)) {
+      days.push({ date: d, revenue: byDay[d] || 0 });
+    }
+    return { summary: s, days: days, names: names(view) };
+  }
+
+  function ownerCustomers(store, staff, now) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    return view.rows('customers').filter(function (c) { return c.anonymized !== true; }).map(function (c) {
+      var since = view.rows('debt_moves').filter(function (m) { return m.customer_id === c.customer_id && m.amount > 0; })
+        .map(function (m) { return m.since_date || String(m.created_at).slice(0, 10); }).sort()[0] || '';
+      return { customer_id: c.customer_id, name: c.name, note: c.note, debt: view.debtOf(c.customer_id), since: since };
+    }).sort(function (a, b) { return b.debt - a.debt || (a.name < b.name ? -1 : 1); });
+  }
+
+  function ownerDispatch(store, staff, body, now) {
+    requireOwnerStaff(staff);
+    if (body.action === 'owner_today') return ownerToday(store, staff, now);
+    if (body.action === 'owner_shifts') return ownerShifts(store, staff, now, Math.min(Number(body.limit) || 40, 200));
+    if (body.action === 'owner_shift') return ownerShift(store, staff, now, String(body.shift_id || ''));
+    if (body.action === 'owner_period') return ownerPeriod(store, staff, now, String(body.from || ''), String(body.to || ''));
+    if (body.action === 'owner_customers') return ownerCustomers(store, staff, now);
+    throw apiError('BAD_ACTION', 'Неизвестное действие');
+  }
+
   /** Обработка запроса после проверки подписи. Чистая относительно Google: store передаётся снаружи. */
   function dispatch(store, telegramId, body, now) {
     var staff = staffOf(store, telegramId);
     if (body.action === 'bootstrap') return { data: bootstrap(store, staff, now), notify: [] };
+    if (String(body.action).indexOf('owner_') === 0) return { data: ownerDispatch(store, staff, body, now), notify: [] };
     if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
     if (body.action === 'close_preview') {
       // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
@@ -122,7 +224,8 @@ var MiniApi = (function () {
       }, notify: [] };
     }
     if (body.action === 'post') {
-      if (staff.role !== 'florist' || !FLORIST_KINDS[body.kind]) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
+      var allowed = staff.role === 'florist' ? FLORIST_KINDS[body.kind] : staff.role === 'owner' ? OWNER_KINDS[body.kind] : false;
+      if (!allowed) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
       var res = Posting.post(store, ctxOf(staff, now), { op_id: body.op_id, kind: body.kind, payload: body.payload || {} });
       return {
         data: { status: res.status, result: res.result, state: bootstrap(store, staff, now) },

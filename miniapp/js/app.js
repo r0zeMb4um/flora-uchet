@@ -77,6 +77,7 @@
     return api({ action: 'bootstrap' }).then(function (data) {
       state.data = data;
       // Ссылка «Закрыть смену в кассе» из чата (передача смены) открывает сразу закрытие.
+      if (data.me.role === 'owner') { openScreen('owner_today'); return; }
       if (location.hash === '#close' && data.shift && data.shift.on_shift) { history.replaceState(null, '', location.pathname); openClose(); return; }
       render();
     })
@@ -156,7 +157,11 @@
     tg.BackButton.offClick(goMain);
     if (on) { tg.BackButton.onClick(goMain); tg.BackButton.show(); } else tg.BackButton.hide();
   }
-  function goMain() { state.screen = 'main'; render(); }
+  function goMain() {
+    // Владелица возвращается в свои разделы, флорист — на главную кассы.
+    if (state.data && state.data.me.role === 'owner') { openScreen(state.screen === 'owner_shift' ? 'owner_history' : 'owner_today'); return; }
+    state.screen = 'main'; render();
+  }
 
   // ---------- экраны ----------
 
@@ -175,6 +180,7 @@
   }
 
   function renderMain() {
+    if (state.data.me.role === 'owner') { openScreen('owner_today'); return; }
     backButton(false);
     mainButton(null);
     var d = state.data;
@@ -911,6 +917,245 @@
     nodes.push(hint);
     app.replaceChildren.apply(app, nodes);
     upd();
+  };
+
+  // ---------- владелица: Сегодня, История, Сводка, Должники ----------
+
+  var OWNER_TABS = [['owner_today', 'Сегодня'], ['owner_history', 'История'], ['owner_period', 'Сводка'], ['owner_debtors', 'Должники']];
+
+  function ownerTabs() {
+    var cur = state.screen === 'owner_shift' ? 'owner_history' : state.screen;
+    return el('div', { class: 'tabs4' }, OWNER_TABS.map(function (t) {
+      return el('button', { class: 'chip', 'aria-pressed': String(cur === t[0]), onclick: function () { openScreen(t[0]); } }, [t[1]]);
+    }));
+  }
+  /** Отчёт с сервера: текст уже экранирован, разрешаем только <b>. */
+  function reportBlock(text) {
+    var box = el('div', { class: 'card', style: 'white-space:pre-wrap;font-size:14px;line-height:1.45' });
+    box.innerHTML = String(text || '').replace(/<(?!\/?b>)[^>]*>/g, '');
+    return box;
+  }
+  /** Загрузить данные экрана владелицы один раз, потом перерисовать. */
+  function ownerLoad(action, params, draw) {
+    var f = state.form;
+    if (f.data === undefined) {
+      f.data = null;
+      app.replaceChildren(ownerTabs(), el('div', { class: 'muted pad center', text: 'Загрузка…' }));
+      api(Object.assign({ action: action }, params || {})).then(function (d) { f.data = d; render(); })
+        .catch(function (e) { f.data = undefined; app.replaceChildren(ownerTabs(), el('div', { class: 'error pad', text: e.message || 'Нет связи' })); });
+      return;
+    }
+    if (f.data) draw(f.data);
+  }
+  function kv(label, value, cls) {
+    return el('div', { class: 'sum' }, [el('span', { class: 'muted', text: label }), el('span', { class: 'num ' + (cls || ''), text: value })]);
+  }
+
+  SCREENS.owner_today = function () {
+    backButton(false);
+    mainButton(null);
+    ownerLoad('owner_today', {}, function (d) {
+      var r = d.shift;
+      var nodes = [ownerTabs()];
+      if (d.alerts.length) nodes.push(el('div', { class: 'card card--note' }, d.alerts.map(function (a) { return el('div', { text: '⚠️ ' + a }); })));
+      if (!r) nodes.push(el('div', { class: 'card' }, [el('div', { text: 'Открытой смены сейчас нет.' })]));
+      else {
+        nodes.push(el('div', { class: 'row' }, [el('h1', { class: 'h1', text: 'Смена №' + r.shift_no }), el('div', { class: 'muted', text: r.florists.join(', ') })]));
+        nodes.push(el('div', { class: 'grid2' }, [
+          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), el('div', { class: 'big num', text: money(r.revenue) }),
+            el('div', { class: 'muted', text: 'чеков: ' + r.receipts_count })]),
+          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'В кассе по расчёту' }), el('div', { class: 'big num', text: money(r.calc_cash) }),
+            el('div', { class: 'muted num', text: 'безнал ' + money(r.card_total) })])
+        ]));
+        nodes.push(el('div', { class: 'card' }, [
+          kv('Наличными', money(r.sales_cash)),
+          kv('Безнал', money(r.sales_card)),
+          r.sales_debt ? kv('В долг', money(r.sales_debt)) : null,
+          r.preorder_unpaid ? kv('Предзаказы к доплате', money(r.preorder_unpaid)) : null,
+          r.discounts ? kv('Скидки', money(r.discounts)) : null,
+          kv('Расходы (доставка + прочее)', money(r.delivery + r.other)),
+          r.withdrawal ? kv('Изъято', money(r.withdrawal)) : null,
+          r.defects.length ? kv('Брак (по закупке)', money(r.defects.reduce(function (a, x) { return a + x.cost; }, 0)), 'copper') : null
+        ]));
+      }
+      if (d.below_min.length) {
+        nodes.push(el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Ниже минимума' })].concat(d.below_min.map(function (b) {
+          return kv(b.name, b.qty + ' / ' + b.min, 'copper');
+        }))));
+      }
+      nodes.push(el('button', { class: 'btn', onclick: function () { state.form.data = undefined; render(); } }, ['Обновить']));
+      app.replaceChildren.apply(app, nodes);
+    });
+  };
+
+  SCREENS.owner_history = function () {
+    backButton(false);
+    mainButton(null);
+    ownerLoad('owner_shifts', { limit: 60 }, function (list) {
+      var nodes = [ownerTabs()];
+      if (!list.length) nodes.push(el('div', { class: 'muted', text: 'Смен пока нет.' }));
+      list.forEach(function (s) {
+        var diff = s.cash_diff === null ? 'открыта' : s.cash_diff === 0 ? 'касса сошлась' : (s.cash_diff > 0 ? 'излишек ' : 'недостача ') + money(Math.abs(s.cash_diff));
+        nodes.push(el('button', { class: 'btn', style: 'text-align:left', onclick: function () { openScreen('owner_shift', { shift_id: s.shift_id }); } }, [
+          el('div', { class: 'sum' }, [el('b', { text: '№' + s.shift_no + ' · ' + s.shift_date.slice(8, 10) + '.' + s.shift_date.slice(5, 7) + (s.corrected ? ' · исправлено' : '') }),
+            el('span', { class: 'num', text: money(s.revenue) })]),
+          el('div', { class: 'muted', text: s.florists.join(', ') + ' · чеков ' + s.receipts + ' · ' + diff })
+        ]));
+      });
+      app.replaceChildren.apply(app, nodes);
+    });
+  };
+
+  SCREENS.owner_shift = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    ownerLoad('owner_shift', { shift_id: f.shift_id }, function (d) {
+      var nodes = [ownerTabs(), reportBlock(d.text)];
+      nodes.push(el('div', { class: 'muted', text: 'Чеки смены' }));
+      d.receipts.forEach(function (r) {
+        var parts = [r.cash ? 'нал ' + money(r.cash) : '', r.card ? 'безнал ' + money(r.card) : '', r.debt ? 'в долг ' + money(r.debt) : '',
+          r.discount ? 'скидка ' + money(r.discount) : ''].filter(Boolean).join(' · ');
+        var card = el('div', { class: 'card' + (r.status === 'cancelled' ? ' card--note' : '') }, [
+          el('div', { class: 'sum' }, [el('span', { text: '№' + r.receipt_no + ' · ' + r.time + ' · ' + ({ sale: 'продажа', bouquet: 'букет', preorder: 'предзаказ' }[r.type] || r.type) +
+            (r.status === 'cancelled' ? ' · снят' : '') }), el('span', { class: 'num', text: money(r.total) })]),
+          parts ? el('div', { class: 'muted num', text: parts }) : null
+        ]);
+        if (d.status === 'closed' && r.status === 'posted') {
+          if (f.fix === r.receipt_id) {
+            card.appendChild(el('input', { class: 'search', placeholder: 'Причина, например «проведён дважды»', value: f.reason || '', oninput: function (e) { f.reason = e.target.value; } }));
+            card.appendChild(el('div', { class: 'muted', text: 'Чек будет снят: товар на склад, долг по чеку снимется, выручка и % смены пересчитаются. Наличные факты смены не меняются (D26).' }));
+            card.appendChild(el('div', { class: 'row' }, [
+              el('button', { class: 'btn btn--primary', disabled: state.sending, onclick: function () {
+                if (!(f.reason || '').trim()) return toast('Напишите причину', true);
+                busy(postOp('correction', { receipt_id: r.receipt_id, reason: f.reason.trim() }, uuid())).then(function (res) {
+                  if (!res) return;
+                  toast('Исправлено. Отчёт отправлен в чат.');
+                  f.fix = null; f.reason = ''; f.data = undefined; render();
+                });
+              } }, ['Снять чек']),
+              el('button', { class: 'btn', onclick: function () { f.fix = null; render(); } }, ['Отмена'])
+            ]));
+          } else {
+            card.appendChild(el('button', { class: 'btn', onclick: function () { f.fix = r.receipt_id; f.reason = ''; render(); } }, ['Исправить']));
+          }
+        }
+        nodes.push(card);
+      });
+      app.replaceChildren.apply(app, nodes);
+    });
+  };
+
+  function isoDay(offsetDays) {
+    var now = new Date(Date.now() + 5 * 3600000);
+    return new Date(now.getTime() + (offsetDays || 0) * 86400000).toISOString().slice(0, 10);
+  }
+  function periodRange(kind, f) {
+    var today = isoDay(0);
+    if (kind === '7') return [isoDay(-6), today];
+    if (kind === 'cur') return [today.slice(0, 8) + '01', today];
+    if (kind === 'prev') {
+      var first = today.slice(0, 8) + '01';
+      var last = new Date(Date.parse(first + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+      return [last.slice(0, 8) + '01', last];
+    }
+    return [f.from || today, f.to || today];
+  }
+
+  SCREENS.owner_period = function () {
+    backButton(false);
+    mainButton(null);
+    var f = state.form;
+    f.kind = f.kind || 'cur';
+    var range = periodRange(f.kind, f);
+    var head = [ownerTabs(), el('div', { class: 'tabs4' }, [['7', '7 дней'], ['cur', 'Месяц'], ['prev', 'Прошлый'], ['own', 'Даты']].map(function (t) {
+      return el('button', { class: 'chip', 'aria-pressed': String(f.kind === t[0]), onclick: function () { f.kind = t[0]; f.data = undefined; render(); } }, [t[1]]);
+    }))];
+    if (f.kind === 'own') {
+      head.push(el('div', { class: 'row' }, [
+        el('input', { class: 'input', type: 'date', value: f.from || '', 'aria-label': 'С', onchange: function (e) { f.from = e.target.value; f.data = undefined; render(); } }),
+        el('input', { class: 'input', type: 'date', value: f.to || '', 'aria-label': 'По', onchange: function (e) { f.to = e.target.value; f.data = undefined; render(); } })
+      ]));
+      if (!f.from || !f.to) { app.replaceChildren.apply(app, head.concat([el('div', { class: 'muted', text: 'Выберите даты.' })])); return; }
+    }
+    ownerLoad('owner_period', { from: range[0], to: range[1] }, function (d) {
+      var s = d.summary;
+      var max = Math.max.apply(null, d.days.map(function (x) { return x.revenue; }).concat([1]));
+      var bars = el('div', { style: 'display:flex;align-items:flex-end;gap:2px;height:120px', role: 'img',
+        'aria-label': 'Выручка по дням: ' + d.days.filter(function (x) { return x.revenue; }).map(function (x) { return x.date.slice(8, 10) + '.' + x.date.slice(5, 7) + ' — ' + x.revenue; }).join(', ') },
+        d.days.map(function (x) {
+          return el('div', { title: x.date + ': ' + money(x.revenue),
+            style: 'flex:1;min-width:2px;border-radius:3px 3px 0 0;background:var(--primary);height:' + Math.max(x.revenue ? 4 : 1, Math.round(x.revenue / max * 120)) + 'px;opacity:' + (x.revenue ? 1 : 0.25) });
+        }));
+      var staff = d.names.staff || {};
+      var ownerItems = Object.keys(s.owner_by_item).map(function (k) { return kv(k, money(s.owner_by_item[k])); });
+      app.replaceChildren.apply(app, head.concat([
+        el('div', { class: 'muted', text: range[0].split('-').reverse().join('.') + ' — ' + range[1].split('-').reverse().join('.') }),
+        el('div', { class: 'grid2' }, [
+          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), el('div', { class: 'big num', text: money(s.revenue) }),
+            el('div', { class: 'muted', text: 'смен ' + s.shifts + ' · чеков ' + s.receipts })]),
+          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Прибыль' }), el('div', { class: 'big num ' + (s.profit < 0 ? 'copper' : ''), text: money(s.profit) }),
+            el('div', { class: 'muted num', text: 'средний чек ' + money(s.avg_check) })])
+        ]),
+        el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Выручка по дням' }), bars,
+          el('div', { class: 'sum muted', style: 'font-size:12px' }, [
+            el('span', { text: d.days[0].date.slice(8, 10) + '.' + d.days[0].date.slice(5, 7) }),
+            el('span', { text: 'макс. ' + money(max) }),
+            el('span', { text: d.days[d.days.length - 1].date.slice(8, 10) + '.' + d.days[d.days.length - 1].date.slice(5, 7) })])]),
+        el('div', { class: 'card' }, [
+          kv('Получено наличными', money(s.cash)),
+          kv('Получено безналом', money(s.card)),
+          kv('Закупки', money(s.purchases)),
+          kv('Зарплата', money(s.payroll))
+        ].concat(s.payroll_by.map(function (p) { return kv('  ' + (staff[p.staff_id] || p.staff_id) + ' · смен ' + p.shifts, money(p.rate + p.pct)); }))
+          .concat([kv('Доставки', money(s.delivery)), kv('Прочие расходы', money(s.other)), kv('Возвраты', money(s.refunds))]).concat(ownerItems)),
+        el('div', { class: 'card' }, [
+          el('div', { class: 'muted', text: 'Потери (в прибыль не входят)' }),
+          kv('Брак / замены', money(s.losses.defects) + ' / ' + money(s.losses.replaces)),
+          kv('Недостачи товара', money(s.losses.shortage)),
+          kv('Расхождения кассы', money(s.losses.cash_diff), s.losses.cash_diff < 0 ? 'copper' : '')
+        ]),
+        el('div', { class: 'card' }, [
+          kv('Скидки', money(s.discounts)),
+          kv('Изъято владелицей', money(s.withdrawal)),
+          kv('Склад: начало → конец', money(s.stock_value_start) + ' → ' + money(s.stock_value_end)),
+          kv('Не получено: долги', money(s.not_received.debts) + (s.not_received.debts_old ? ' (старше 30 дн. ' + money(s.not_received.debts_old) + ')' : '')),
+          kv('Предзаказы к доплате', money(s.not_received.preorders))
+        ])
+      ]));
+    });
+  };
+
+  SCREENS.owner_debtors = function () {
+    backButton(false);
+    mainButton(null);
+    var f = state.form;
+    ownerLoad('owner_customers', {}, function (list) {
+      var total = list.reduce(function (a, c) { return a + c.debt; }, 0);
+      var nodes = [ownerTabs(), el('div', { class: 'card' }, [kv('Итого долгов', money(total))])];
+      list.forEach(function (c) {
+        var card = el('div', { class: 'card' }, [
+          el('div', { class: 'sum' }, [el('b', { text: c.name }), el('span', { class: 'num ' + (c.debt ? 'copper' : ''), text: c.debt ? money(c.debt) : 'без долга' })]),
+          el('div', { class: 'muted', text: [c.note, c.since && c.debt ? 'с ' + c.since.split('-').reverse().join('.') : ''].filter(Boolean).join(' · ') })
+        ]);
+        if (f.anon === c.customer_id) {
+          card.appendChild(el('div', { class: 'muted', text: 'Имя и пометка будут стёрты по просьбе человека (закон о ПД). Долг и суммы в отчётах останутся. Отменить нельзя.' }));
+          card.appendChild(el('div', { class: 'row' }, [
+            el('button', { class: 'btn btn--primary', disabled: state.sending, onclick: function () {
+              busy(postOp('anonymize', { customer_id: c.customer_id }, uuid())).then(function (res) {
+                if (!res) return;
+                toast('Обезличено'); f.anon = null; f.data = undefined; render();
+              });
+            } }, ['Обезличить']),
+            el('button', { class: 'btn', onclick: function () { f.anon = null; render(); } }, ['Отмена'])
+          ]));
+        } else {
+          card.appendChild(el('button', { class: 'btn', onclick: function () { f.anon = c.customer_id; render(); } }, ['Обезличить…']));
+        }
+        nodes.push(card);
+      });
+      app.replaceChildren.apply(app, nodes);
+    });
   };
 
   // ---------- проведение ----------

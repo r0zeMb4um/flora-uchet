@@ -122,3 +122,7 @@ body {
 
 /* Без Telegram (открыто в обычном браузере) — своя кнопка внизу. */
 .fallback-main { position: sticky; bottom: 12px; }
+
+/* Вкладки владелицы — 4 равные колонки, без прокрутки. */
+.tabs4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.tabs4 .chip { padding: 8px 4px; font-size: 14px; text-align: center; }
