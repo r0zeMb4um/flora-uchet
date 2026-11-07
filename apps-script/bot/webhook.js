@@ -90,6 +90,9 @@ var Webhook = (function () {
     return {
       store: store,
       miniAppUrl: MINIAPP_URL,
+      botUsername: PropertiesService.getScriptProperties().getProperty('BOT_USERNAME') || 'flora_uchet_bot',
+      newToken: function () { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, 32); },
+      reportText: function (shiftId) { return shiftReportText_(store, ctx.client_id, shiftId) || 'Отчёт не найден.'; },
       send: function (text, rows) { return Tg.send(chatId, text, rows ? { reply_markup: { inline_keyboard: rows } } : undefined); },
       state: {
         get: function () { var v = cache.get(key); return v ? JSON.parse(v) : null; },
@@ -168,8 +171,8 @@ var Webhook = (function () {
     var keyboard;
     if (me.role === 'owner') {
       lines.push(shift ? 'Сейчас открыта смена №' + shift.shift_no + '.' : 'Открытой смены нет.');
-      lines.push('Отчёты и настройки появятся на следующем этапе.');
-      keyboard = [['Меню']];
+      lines.push('Отчёт приходит сам после закрытия смены.');
+      keyboard = [['Отчёт за смену', 'Предзаказы'], ['Сотрудники', 'Расходы месяца']];
     } else if (shift && view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === me.staff_id; })) {
       lines.push('Открыта смена №' + shift.shift_no + '. Продажи и закрытие — в кассе: кнопка «Касса» слева от поля ввода.');
       keyboard = [['Расход', 'Владелица забрала'], ['Погашение долга', 'Отменить продажу'], ['Передать смену']];

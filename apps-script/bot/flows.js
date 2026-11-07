@@ -21,8 +21,14 @@ var ChatFlows = (function () {
     'Владелица забрала': 'withdrawal',
     'Погашение долга': 'repay',
     'Отменить продажу': 'cancel',
-    'Передать смену': 'handover'
+    'Передать смену': 'handover',
+    // Владелица
+    'Сотрудники': 'staff',
+    'Расходы месяца': 'expenses',
+    'Предзаказы': 'preorders',
+    'Отчёт за смену': 'report'
   };
+  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true };
   var CANCEL_ROW = [{ text: 'Отмена', callback_data: 'f:x' }];
 
   function money(n) {
@@ -53,8 +59,12 @@ var ChatFlows = (function () {
   function start(ctx, text, updateId, deps) {
     var flow = MENU[text];
     var view = O.makeView(deps.store, ctx);
-    var shift = requireOnShift(view);
     var st = { flow: flow, step: '', d: {}, op_id: 'tg-op-' + String(updateId).padStart(10, '0') };
+    if (OWNER_FLOWS[flow]) {
+      if (ctx.role !== 'owner' && ctx.role !== 'admin') throw O.opsError('FORBIDDEN', 'Это меню владелицы');
+      return Owner.start(view, st, deps);
+    }
+    var shift = requireOnShift(view);
 
     if (flow === 'expense') {
       st.step = 'type';
@@ -107,6 +117,10 @@ var ChatFlows = (function () {
     if (data === 'f:x') { deps.state.clear(); return deps.send('Отменено. Ничего не записано.'); }
     if (!st) return deps.send('Эта кнопка уже не действует. Начните заново из меню.');
     var view = O.makeView(deps.store, ctx);
+    if (OWNER_FLOWS[st.flow]) {
+      if (data === 'f:ok' && st.step === 'confirm') return commit(ctx, st, deps);
+      return Owner.onButton(view, st, data, deps);
+    }
 
     if (st.flow === 'expense' && st.step === 'type' && data.indexOf('f:t:') === 0) {
       st.d.type = data.slice(4) === 'delivery' ? 'delivery' : 'other';
@@ -154,6 +168,7 @@ var ChatFlows = (function () {
   function onText(ctx, text, deps) {
     var st = deps.state.get();
     if (!st) return null;
+    if (OWNER_FLOWS[st.flow]) return Owner.onText(O.makeView(deps.store, ctx), st, text, deps);
     if (st.step === 'amount') {
       var n = intOf(text);
       if (!n) return deps.send('Напишите сумму цифрами, например: 2500');
@@ -198,7 +213,7 @@ var ChatFlows = (function () {
     if (st.flow === 'withdrawal') return 'Владелица забрала из кассы: <b>' + money(d.amount) + '</b>';
     if (st.flow === 'repay') return 'Погашение долга: ' + esc(d.name) + ' — <b>' + money(d.amount) + '</b> ' + (d.method === 'card' ? 'безналом' : 'наличными') + '\nОстанется долг: ' + money(d.debt - d.amount);
     if (st.flow === 'cancel') return 'Отменить чек №' + d.receipt_no + ' на <b>' + money(d.total) + '</b>\nПричина: ' + esc(d.reason) + '\nТовар вернётся на склад, оплаты и долг по чеку аннулируются.';
-    return '';
+    return Owner.summary(st);
   }
 
   function confirm(st, deps) {
@@ -215,21 +230,241 @@ var ChatFlows = (function () {
     else if (st.flow === 'withdrawal') req = { kind: 'withdrawal', payload: { amount: d.amount } };
     else if (st.flow === 'repay') req = { kind: 'debt_repay', payload: { customer_id: d.customer_id, method: d.method, amount: d.amount } };
     else if (st.flow === 'cancel') req = { kind: 'cancel', payload: { receipt_id: d.receipt_id, reason: d.reason } };
+    else if (OWNER_FLOWS[st.flow] && d.req) req = d.req;
     else { deps.state.clear(); return deps.send('Сценарий устарел. Начните заново из меню.'); }
     req.op_id = st.op_id;
     deps.state.clear(); // повторное нажатие «Провести» больше ничего не сделает
     var res = P.post(deps.store, ctx, req);
     deps.send('✅ Проведено. ' + summary(st).split('\n')[0]);
+    if (res.result && res.result.token) {
+      deps.send('Ссылка-приглашение (одноразовая, действует 48 часов). Перешлите её флористу:\n' +
+        'https://t.me/' + deps.botUsername + '?start=' + res.result.token);
+    }
     deps.notify(res.notify || []);
     return res;
   }
+
+  // ---------- меню владелицы ----------
+
+  var Owner = {
+    start: function (view, st, deps) {
+      if (st.flow === 'staff') return Owner.staffList(view, st, deps);
+      if (st.flow === 'expenses') {
+        var items = String(view.settings().expense_items || 'Аренда').split(';').map(function (x) { return x.trim(); }).filter(Boolean);
+        st.step = 'item';
+        st.d = { items: items };
+        deps.state.set(st);
+        var month = view.ctx.now.slice(0, 7);
+        var sums = {};
+        view.rows('owner_expenses').filter(function (e) { return e.month === month; })
+          .forEach(function (e) { sums[e.item] = (sums[e.item] || 0) + e.amount; });
+        var lines = Object.keys(sums).map(function (k) { return esc(k) + ': ' + money(sums[k]); });
+        return deps.send('Расходы за ' + month + (lines.length ? ':\n' + lines.join('\n') : ': пока нет.') + '\n\nКакую статью внести?',
+          items.map(function (it, i) { return [{ text: it, callback_data: 'o:ei:' + i }]; })
+            .concat([[{ text: 'Другая статья', callback_data: 'o:ei:new' }], CANCEL_ROW]));
+      }
+      if (st.flow === 'preorders') {
+        var pre = view.rows('receipts').filter(function (r) {
+          return r.type === 'preorder' && r.status === 'posted' && (r.assembly_status === 'waiting' || r.assembly_status === 'assembled');
+        }).sort(function (a, b) { return a.pickup_date < b.pickup_date ? -1 : 1; });
+        if (!pre.length) return deps.send('Активных предзаказов нет.');
+        st.step = 'pick';
+        deps.state.set(st);
+        return deps.send('Активные предзаказы. Выберите, чтобы отменить:', pre.slice(0, 20).map(function (r) {
+          var c = view.customer(r.customer_id);
+          return [{ text: r.pickup_date.slice(8, 10) + '.' + r.pickup_date.slice(5, 7) + ' · ' + (c ? c.name : '') + ' · ' + money(r.total), callback_data: 'o:p:' + r.receipt_id }];
+        }).concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'report') {
+        var shifts = view.rows('shifts').filter(function (s) { return s.status === 'closed'; })
+          .sort(function (a, b) { return a.closed_at < b.closed_at ? 1 : -1; });
+        if (!shifts.length) return deps.send('Закрытых смен пока нет.');
+        if (shifts.length === 1) return deps.send(deps.reportText(shifts[0].shift_id));
+        st.step = 'pick';
+        deps.state.set(st);
+        return deps.send('Отчёт какой смены?', shifts.slice(0, 8).map(function (s) {
+          return [{ text: '№' + s.shift_no + ' · ' + s.shift_date.slice(8, 10) + '.' + s.shift_date.slice(5, 7), callback_data: 'o:r:' + s.shift_id }];
+        }).concat([CANCEL_ROW]));
+      }
+      return null;
+    },
+
+    staffList: function (view, st, deps) {
+      st.step = 'pick';
+      deps.state.set(st);
+      var florists = view.rows('staff').filter(function (s) { return s.role === 'florist'; });
+      return deps.send('Флористы точки. Выберите, чтобы дать новую ссылку или отключить доступ:', florists.map(function (s) {
+        var mark = s.active !== true ? '⛔ отключена' : s.telegram_id ? '✅ подключена' : '⏳ ждёт входа';
+        return [{ text: s.name + ' · ' + money(s.shift_rate) + ' + ' + (s.pct_bp / 100) + '% · ' + mark, callback_data: 'o:s:' + s.staff_id }];
+      }).concat([[{ text: '+ Добавить флориста', callback_data: 'o:add' }], CANCEL_ROW]));
+    },
+
+    onButton: function (view, st, data, deps) {
+      var d = st.d;
+      if (st.flow === 'staff' && data === 'o:add') {
+        st.step = 'name'; st.d = {}; deps.state.set(st);
+        return deps.send('Как зовут нового флориста? Только имя.', [CANCEL_ROW]);
+      }
+      if (st.flow === 'staff' && data.indexOf('o:s:') === 0) {
+        var s = view.staff(data.slice(4));
+        if (!s) return deps.send('Сотрудник не найден.');
+        st.d = { staff_id: s.staff_id, name: s.name };
+        st.step = 'act'; deps.state.set(st);
+        var rows = s.active === true
+          ? [[{ text: 'Новая ссылка-приглашение', callback_data: 'o:inv' }], [{ text: 'Отключить доступ', callback_data: 'o:off' }]]
+          : [[{ text: 'Вернуть доступ', callback_data: 'o:on' }]];
+        return deps.send(esc(s.name) + ': ' + (s.active !== true ? 'доступ отключён' : s.telegram_id ? 'подключена к боту' : 'ещё не входила по ссылке'),
+          rows.concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'staff' && st.step === 'act' && (data === 'o:inv' || data === 'o:off' || data === 'o:on')) {
+        d.req = data === 'o:inv'
+          ? { kind: 'staff_invite', payload: { staff_id: d.staff_id, invite_token: deps.newToken() } }
+          : { kind: 'staff_set_active', payload: { staff_id: d.staff_id, active: data === 'o:on' } };
+        d.what = data;
+        return confirm(st, deps);
+      }
+      if (st.flow === 'expenses' && st.step === 'item' && data.indexOf('o:ei:') === 0) {
+        var k = data.slice(5);
+        if (k === 'new') { st.step = 'item_name'; deps.state.set(st); return deps.send('Название статьи (например, «Налоги»):', [CANCEL_ROW]); }
+        d.item = d.items[Number(k)];
+        if (!d.item) return deps.send('Статья не найдена.');
+        return Owner.askMonth(view, st, deps);
+      }
+      if (st.flow === 'expenses' && st.step === 'month' && data.indexOf('o:mo:') === 0) {
+        d.month = data.slice(5);
+        st.step = 'amount'; deps.state.set(st);
+        var prev = Owner.prevMonth(d.month);
+        var last = view.rows('owner_expenses').filter(function (e) { return e.month === prev && e.item === d.item; })
+          .reduce(function (a, e) { return a + e.amount; }, 0);
+        var hint = last > 0 ? [[{ text: 'Как в прошлом месяце: ' + money(last), callback_data: 'o:am:' + last }]] : [];
+        return deps.send(esc(d.item) + ' за ' + d.month + '. Сумма цифрами?', hint.concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'expenses' && st.step === 'amount' && data.indexOf('o:am:') === 0) {
+        d.amount = Number(data.slice(5));
+        d.req = { kind: 'owner_expense', payload: { month: d.month, item: d.item, amount: d.amount } };
+        return confirm(st, deps);
+      }
+      if (st.flow === 'preorders' && st.step === 'pick' && data.indexOf('o:p:') === 0) {
+        var r = view.receipt(data.slice(4));
+        if (!r || r.status !== 'posted') return deps.send('Предзаказ не найден.');
+        var paid = view.rows('payments').filter(function (p) { return p.receipt_id === r.receipt_id; })
+          .reduce(function (a, p) { return a + (p.kind === 'refund' ? -p.amount : p.amount); }, 0);
+        var c = view.customer(r.customer_id);
+        st.d = { receipt_id: r.receipt_id, name: c ? c.name : '', total: r.total, paid: paid, assembled: r.assembly_status === 'assembled' };
+        if (paid <= 0) { st.d.refund = 'keep'; return Owner.askStock(st, deps); }
+        st.step = 'refund'; deps.state.set(st);
+        var opts = [];
+        if (view.openShift()) opts.push([{ text: 'Вернуть ' + money(paid) + ' наличными из кассы', callback_data: 'o:rf:cash' }]);
+        opts.push([{ text: 'Вернуть ' + money(paid) + ' на карту', callback_data: 'o:rf:card' }], [{ text: 'Аванс остаётся магазину', callback_data: 'o:rf:keep' }]);
+        return deps.send('Отмена предзаказа: ' + esc(st.d.name) + ', ' + money(r.total) + ', аванс ' + money(paid) + '. Что с авансом?', opts.concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'preorders' && st.step === 'refund' && data.indexOf('o:rf:') === 0) {
+        d.refund = data.slice(5);
+        return Owner.askStock(st, deps);
+      }
+      if (st.flow === 'preorders' && st.step === 'stock' && data.indexOf('o:rs:') === 0) {
+        d.return_stock = data === 'o:rs:1';
+        st.step = 'reason'; deps.state.set(st);
+        return deps.send('Причина отмены?', [CANCEL_ROW]);
+      }
+      if (st.flow === 'report' && data.indexOf('o:r:') === 0) {
+        deps.state.clear();
+        return deps.send(deps.reportText(data.slice(4)));
+      }
+      return deps.send('Эта кнопка уже не действует. Начните заново из меню.');
+    },
+
+    onText: function (view, st, text, deps) {
+      var d = st.d;
+      var t = String(text).trim();
+      if (st.flow === 'staff' && st.step === 'name') {
+        if (!t || t.length > 40) return deps.send('Имя — до 40 символов.');
+        d.name = t; st.step = 'rate'; deps.state.set(st);
+        return deps.send('Ставка за смену, ₸? Например: 5000');
+      }
+      if (st.flow === 'staff' && st.step === 'rate') {
+        var rate = intOf(t);
+        if (!rate) return deps.send('Ставка цифрами, например: 5000');
+        d.rate = rate; st.step = 'pct'; deps.state.set(st);
+        return deps.send('Процент от продаж? Например: 3 или 2,5');
+      }
+      if (st.flow === 'staff' && st.step === 'pct') {
+        var v = Number(t.replace(',', '.').replace('%', ''));
+        var bp = Math.round(v * 100);
+        if (!/^\d{1,3}([.,]\d{1,2})?%?$/.test(t) || !isFinite(v) || bp > 10000) return deps.send('Процент числом от 0 до 100, например: 3 или 2,5');
+        d.pct_bp = bp;
+        d.req = { kind: 'staff_add', payload: { name: d.name, shift_rate: d.rate, pct_bp: bp, invite_token: deps.newToken() } };
+        return confirm(st, deps);
+      }
+      if (st.flow === 'expenses' && st.step === 'item_name') {
+        if (!t || t.length > 60) return deps.send('Название до 60 символов.');
+        d.item = t;
+        return Owner.askMonth(view, st, deps);
+      }
+      if (st.flow === 'expenses' && st.step === 'amount') {
+        var a = intOf(t);
+        if (!a) return deps.send('Сумма цифрами, например: 120000');
+        d.amount = a;
+        d.req = { kind: 'owner_expense', payload: { month: d.month, item: d.item, amount: a } };
+        return confirm(st, deps);
+      }
+      if (st.flow === 'preorders' && st.step === 'reason') {
+        if (!t) return deps.send('Напишите причину.');
+        d.reason = t.slice(0, 200);
+        var payload = { receipt_id: d.receipt_id, reason: d.reason, return_stock: !!d.return_stock };
+        if (d.refund === 'cash' || d.refund === 'card') payload.refund = { method: d.refund, amount: d.paid };
+        d.req = { kind: 'preorder_cancel', payload: payload };
+        return confirm(st, deps);
+      }
+      return deps.send('Нажмите одну из кнопок выше или «Отмена».');
+    },
+
+    askMonth: function (view, st, deps) {
+      var cur = view.ctx.now.slice(0, 7);
+      var prev = Owner.prevMonth(cur);
+      st.step = 'month'; deps.state.set(st);
+      return deps.send(esc(st.d.item) + '. За какой месяц?', [
+        [{ text: 'Этот: ' + cur, callback_data: 'o:mo:' + cur }, { text: 'Прошлый: ' + prev, callback_data: 'o:mo:' + prev }], CANCEL_ROW]);
+    },
+    askStock: function (st, deps) {
+      if (!st.d.assembled) { st.d.return_stock = false; st.step = 'reason'; deps.state.set(st); return deps.send('Причина отмены?', [CANCEL_ROW]); }
+      st.step = 'stock'; deps.state.set(st);
+      return deps.send('Букет уже собран. Вернуть цветы на склад?', [
+        [{ text: 'Да, вернуть на склад', callback_data: 'o:rs:1' }, { text: 'Нет', callback_data: 'o:rs:0' }], CANCEL_ROW]);
+    },
+    prevMonth: function (m) {
+      var y = Number(m.slice(0, 4));
+      var mo = Number(m.slice(5, 7)) - 1;
+      if (mo === 0) { y -= 1; mo = 12; }
+      return y + '-' + (mo < 10 ? '0' : '') + mo;
+    },
+    summary: function (st) {
+      var d = st.d;
+      if (st.flow === 'staff' && d.req && d.req.kind === 'staff_add') {
+        return 'Новый флорист: <b>' + esc(d.name) + '</b>\nСтавка ' + money(d.rate) + ' + ' + (d.pct_bp / 100) + '% от продаж\nПосле подтверждения бот даст ссылку-приглашение.';
+      }
+      if (st.flow === 'staff') {
+        return (d.what === 'o:inv' ? 'Новая ссылка для ' : d.what === 'o:off' ? 'Отключить доступ: ' : 'Вернуть доступ: ') + '<b>' + esc(d.name) + '</b>' +
+          (d.what === 'o:inv' ? '\nСтарые ссылки перестанут работать.' : d.what === 'o:off' ? '\nДоступ пропадёт сразу, прошлые записи останутся.' : '');
+      }
+      if (st.flow === 'expenses') return 'Расход месяца: ' + esc(d.item) + ' за ' + d.month + ' — <b>' + money(d.amount) + '</b>\nНе из кассы, вычитается из прибыли месяца.';
+      if (st.flow === 'preorders') {
+        var adv = d.refund === 'cash' ? 'Аванс ' + money(d.paid) + ' вернуть наличными из кассы'
+          : d.refund === 'card' ? 'Аванс ' + money(d.paid) + ' вернуть на карту'
+          : d.paid > 0 ? 'Аванс ' + money(d.paid) + ' остаётся магазину' : 'Аванса не было';
+        return 'Отменить предзаказ: ' + esc(d.name) + ', ' + money(d.total) + '\n' + adv +
+          (d.assembled ? '\nБукет: ' + (d.return_stock ? 'вернуть на склад' : 'не возвращать') : '') + '\nПричина: ' + esc(d.reason);
+      }
+      return '';
+    }
+  };
 
   /** Вход: что пришло — меню, кнопка сценария или текст. Возвращает true, если сообщение обработано. */
   function handle(ctx, input, deps) {
     try {
       if (input.text === 'Отмена') { deps.state.clear(); deps.send('Отменено. Ничего не записано.'); return true; }
       if (input.text && isMenu(input.text)) { deps.state.clear(); start(ctx, input.text, input.update_id, deps); return true; }
-      if (input.data && input.data.indexOf('f:') === 0) { onButton(ctx, input.data, deps); return true; }
+      if (input.data && (input.data.indexOf('f:') === 0 || input.data.indexOf('o:') === 0)) { onButton(ctx, input.data, deps); return true; }
       if (input.text && deps.state.get()) { onText(ctx, input.text, deps); return true; }
       return false;
     } catch (err) {

@@ -23,7 +23,7 @@ var Ops = (function () {
   // Листы, где у строки есть точка (point_id). Остальные — общие на клиента.
   var POINT_SHEETS = {
     shifts: true, shift_staff: true, receipts: true, payments: true, stock_moves: true,
-    cash_ops: true, debt_moves: true, reservations: true, owner_expenses: true
+    cash_ops: true, debt_moves: true, reservations: true, owner_expenses: true, staff: true, invites: true
   };
   var CATEGORIES = ['flowers', 'greens', 'toys', 'baskets', 'packaging'];
   var DEFECT_REASONS = ['arrived_bad', 'wilted', 'broken', 'gift', 'other'];
@@ -698,6 +698,58 @@ var Ops = (function () {
       payroll_due: due, payroll_paid: close.payroll_paid_each, payroll_unpaid: close.payroll_unpaid_each,
       can_take_above_change_fund: close.can_take_above_change_fund, max_withdrawal: p.counted - close.payroll_paid_total
     };
+  };
+
+  // ---------- сотрудники (владелица, решение D17) ----------
+
+  function inviteRow(plan, view, staffId, token, now) {
+    if (typeof token !== 'string' || token.length < 16) throw opsError('BAD_INPUT', 'Нет токена приглашения');
+    var expires = new Date(Date.parse(now) + 48 * 3600000);
+    // Срок — 48 часов; время в ISO по Алматы (UTC+5).
+    var iso = new Date(expires.getTime() + 5 * 3600000).toISOString().slice(0, 19) + '+05:00';
+    // Прежние активные приглашения этого сотрудника гасим.
+    view.rows('invites').filter(function (i) { return i.staff_id === staffId && i.status === 'active'; }).forEach(function (i) {
+      update(plan, 'invites', { token: i.token }, i, { status: 'revoked' });
+    });
+    add(plan, view, 'invites', { token: token, staff_id: staffId, expires_at: iso, status: 'active', used_by_telegram_id: '' });
+    return token;
+  }
+
+  /** Новый флорист: строка сотрудника + ссылка-приглашение (48 часов, одноразовая). */
+  H.staff_add = function (view, p, plan) {
+    requireOwner(view);
+    var name = text(p.name, 'имя', 40);
+    var pct = nonNegInt(p.pct_bp, 'процент');
+    if (pct > 10000) throw opsError('BAD_INPUT', 'Процент не больше 100');
+    var id = 'st-' + plan.op_id;
+    add(plan, view, 'staff', {
+      staff_id: id, telegram_id: '', name: name, role: 'florist',
+      shift_rate: nonNegInt(p.shift_rate, 'ставка'), pct_bp: pct, consent_at: '', consent_version: '', active: true
+    });
+    plan.result = { staff_id: id, token: inviteRow(plan, view, id, p.invite_token, view.ctx.now) };
+  };
+
+  /** Новая ссылка для сотрудника (сменил телефон или аккаунт): старые приглашения гаснут. */
+  H.staff_invite = function (view, p, plan) {
+    requireOwner(view);
+    var s = view.staff(p.staff_id);
+    if (!s || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет такого флориста');
+    plan.result = { staff_id: s.staff_id, token: inviteRow(plan, view, s.staff_id, p.invite_token, view.ctx.now) };
+  };
+
+  /** Отключить или вернуть доступ. Отключённый теряет доступ сразу, его записи остаются. */
+  H.staff_set_active = function (view, p, plan) {
+    requireOwner(view);
+    var s = view.staff(p.staff_id);
+    if (!s || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет такого флориста');
+    if (typeof p.active !== 'boolean') throw opsError('BAD_INPUT', 'Включить или отключить?');
+    update(plan, 'staff', { staff_id: s.staff_id, client_id: plan.client_id }, s, { active: p.active });
+    if (!p.active) {
+      view.rows('invites').filter(function (i) { return i.staff_id === s.staff_id && i.status === 'active'; }).forEach(function (i) {
+        update(plan, 'invites', { token: i.token }, i, { status: 'revoked' });
+      });
+    }
+    plan.result = { staff_id: s.staff_id, active: p.active };
   };
 
   H.owner_expense = function (view, p, plan) {

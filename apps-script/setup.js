@@ -114,7 +114,7 @@ function createInvite_(store, clientId, pointId, staffId, days) {
   store.append('invites', [{
     token: token, client_id: clientId, point_id: pointId, staff_id: staffId,
     expires_at: Utilities.formatDate(expires, 'Asia/Almaty', "yyyy-MM-dd'T'HH:mm:ssXXX"),
-    status: 'active', used_by_telegram_id: '', op_id: 'invite-' + token, created_at: nowIso()
+    status: 'active', used_by_telegram_id: '', op_id: 'seed', created_at: nowIso()
   }]);
   return token;
 }

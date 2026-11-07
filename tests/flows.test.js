@@ -27,19 +27,22 @@ function shop() {
 }
 
 /** Имитация чата: что бот отправил и состояние сценария. */
+// Номера обновлений Telegram у бота не повторяются — общий счётчик на все чаты теста.
+let updSeq = 1000;
 function chat(store, ctx) {
   let st = null;
-  let upd = 1000;
   const sent = [];
   const notified = [];
   const deps = {
-    store, miniAppUrl: 'https://example.test/kassa/',
+    store, miniAppUrl: 'https://example.test/kassa/', botUsername: 'test_bot',
+    newToken: () => 'tok' + String(++updSeq).padStart(29, '0'),
+    reportText: (id) => 'ОТЧЁТ ' + id,
     send: (text, rows) => { sent.push({ text, rows: rows || [] }); },
     state: { get: () => (st ? JSON.parse(JSON.stringify(st)) : null), set: (v) => { st = JSON.parse(JSON.stringify(v)); }, clear: () => { st = null; } },
     notify: (list) => notified.push(...list)
   };
-  const say = (text) => ChatFlows.handle(ctx, { text, data: '', update_id: ++upd }, deps);
-  const press = (data) => ChatFlows.handle(ctx, { text: '', data, update_id: ++upd }, deps);
+  const say = (text) => ChatFlows.handle(ctx, { text, data: '', update_id: ++updSeq }, deps);
+  const press = (data) => ChatFlows.handle(ctx, { text: '', data, update_id: ++updSeq }, deps);
   const last = () => sent[sent.length - 1];
   const buttons = () => last().rows.flat().map((b) => b.callback_data || b.web_app && b.web_app.url);
   return { say, press, last, buttons, sent, notified, state: () => st };
@@ -155,4 +158,93 @@ test('старые кнопки другого сценария не сраба�
   c.press('f:t:delivery');
   assert.match(c.last().text, /уже не действует/);
   assert.equal(store.tables.cash_ops, undefined);
+});
+
+// ---------- меню владелицы ----------
+
+const ownerCtx = { client_id: 'c1', point_id: 'p1', staff_id: 's_owner', role: 'owner', now: NOW, tg: '1' };
+
+test('сотрудники: добавить флориста → ссылка; новая ссылка гасит старую; отключить — доступ пропал сразу', () => {
+  const { store, anna } = shop();
+  const o = chat(store, ownerCtx);
+  o.say('Сотрудники');
+  assert.ok(o.buttons().includes('o:add'));
+  assert.match(o.last().rows[0][0].text, /Анна · 5 000 ₸ \+ 3% ·/);
+  o.press('o:add'); o.say('Сауле'); o.say('пять'); o.say('4500'); o.say('2,5');
+  assert.match(o.last().text, /Новый флорист: <b>Сауле<\/b>\nСтавка 4 500 ₸ \+ 2.5% от продаж/);
+  o.press('f:ok');
+  const link = o.sent.find((m) => m.text.includes('t.me/test_bot?start='));
+  assert.ok(link, 'бот дал ссылку');
+  const saule = store.tables.staff.find((s) => s.name === 'Сауле');
+  assert.deepEqual([saule.shift_rate, saule.pct_bp, saule.role, saule.active, saule.point_id], [4500, 250, 'florist', true, 'p1']);
+  const firstToken = store.tables.invites.find((i) => i.staff_id === saule.staff_id).token;
+
+  o.say('Сотрудники'); o.press('o:s:' + saule.staff_id); o.press('o:inv'); o.press('f:ok');
+  const inv = store.tables.invites.filter((i) => i.staff_id === saule.staff_id);
+  assert.deepEqual(inv.map((i) => i.status), ['revoked', 'active']);
+  assert.notEqual(inv[1].token, firstToken);
+
+  o.say('Сотрудники'); o.press('o:s:s_anna'); o.press('o:off');
+  assert.match(o.last().text, /Доступ пропадёт сразу/);
+  o.press('f:ok');
+  const a = chat(store, anna);
+  a.say('Расход'); a.press('f:t:other'); a.say('100'); a.press('f:nc'); a.press('f:ok');
+  assert.match(a.last().text, /Доступ отключён/);
+  o.say('Сотрудники'); o.press('o:s:s_anna'); o.press('o:on'); o.press('f:ok');
+  assert.equal(store.tables.staff.find((s) => s.staff_id === 's_anna').active, true);
+});
+
+test('процент флориста: «3», «2,5», «2.75» — да; «abc», «101», «2,555» — переспросить', () => {
+  const { store } = shop();
+  const o = chat(store, ownerCtx);
+  for (const [txt, ok] of [['abc', false], ['101', false], ['2,555', false], ['2.75', true]]) {
+    o.say('Сотрудники'); o.press('o:add'); o.say('Тест'); o.say('5000'); o.say(txt);
+    if (ok) assert.match(o.last().text, /\+ 2.75% от продаж/);
+    else assert.match(o.last().text, /Процент числом/);
+  }
+});
+
+test('расходы месяца: статья → месяц → сумма (подсказка прошлого месяца) → не в кассе', () => {
+  const { store } = shop();
+  const o = chat(store, ownerCtx);
+  o.say('Расходы месяца'); o.press('o:ei:new'); o.say('Аренда'); o.press('o:mo:2026-10'); o.say('120000'); o.press('f:ok');
+  o.say('Расходы месяца');
+  o.press('o:ei:new'); o.say('Аренда'); o.press('o:mo:2026-11');
+  assert.ok(o.buttons().includes('o:am:120000'), 'подсказка «как в прошлом месяце»');
+  o.press('o:am:120000');
+  assert.match(o.last().text, /Не из кассы/);
+  o.press('f:ok');
+  assert.deepEqual(store.tables.owner_expenses.map((e) => [e.month, e.item, e.amount]), [['2026-10', 'Аренда', 120000], ['2026-11', 'Аренда', 120000]]);
+  assert.equal(cashOf(store), 15000);
+});
+
+test('предзаказы владелицы: отменить с возвратом аванса на карту и букетом на склад', () => {
+  const { store, anna } = shop();
+  const pre = Posting.post(store, anna, { op_id: 'pre-0000001', kind: 'preorder', payload: { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-09', price: 9000, payments: [{ method: 'cash', amount: 2000 }] } });
+  Posting.post(store, anna, { op_id: 'asm-0000001', kind: 'preorder_assemble', payload: { receipt_id: pre.result.receipt_id, items: [{ item_id: 'bear', qty: 2 }] } });
+  const o = chat(store, ownerCtx);
+  o.say('Предзаказы');
+  o.press('o:p:' + pre.result.receipt_id);
+  assert.ok(o.buttons().includes('o:rf:cash'), 'смена открыта — можно наличными');
+  o.press('o:rf:card'); o.press('o:rs:1'); o.say('клиент уехал');
+  assert.match(o.last().text, /Аванс 2 000 ₸ вернуть на карту\nБукет: вернуть на склад\nПричина: клиент уехал/);
+  o.press('f:ok');
+  assert.equal(view(store).stock('bear'), 5);
+  assert.equal(store.tables.receipts[0].assembly_status, 'cancelled');
+  o.say('Предзаказы');
+  assert.match(o.last().text, /Активных предзаказов нет/);
+});
+
+test('отчёт за смену по кнопке; флорист не может открыть меню владелицы', () => {
+  const { store, anna } = shop();
+  const o = chat(store, ownerCtx);
+  o.say('Отчёт за смену');
+  assert.match(o.last().text, /Закрытых смен пока нет/);
+  Posting.post(store, anna, { op_id: 'inv-0000001', kind: 'inventory', payload: { facts: { bear: 5 } } });
+  Posting.post(store, anna, { op_id: 'close-000001', kind: 'close_shift', payload: { counted: 15000, expenses_confirmed: true } });
+  o.say('Отчёт за смену');
+  assert.match(o.last().text, /^ОТЧЁТ sh-/);
+  const a = chat(store, anna);
+  a.say('Сотрудники');
+  assert.match(a.last().text, /меню владелицы/);
 });
