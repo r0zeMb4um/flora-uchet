@@ -34,7 +34,6 @@
 - [x] `setup()`: все листы и заголовки из `infra/schema.js` (= `docs/DATA_MODEL.md`), форматы, защита, тестовый магазин, приглашения. Таблица «Флора·Учёт — пилот» создана в аккаунте проекта.
 - [x] Проведение (`core/posting.js`: блокировка, `pending → posted`, дописывание по сохранённому плану, пересчёт остатков, `failStale`, `reconcileStock`) — готово на этапе B.
 - [x] Адаптер листов (`infra/sheets.js`, схема `infra/schema.js`; симуляция сверяет каждую запись со схемой)
-- [ ] ~~Адаптер листов (`infra/`): блокировка, `pending → posted`, дописывание, `stock_balance`, кэш.
 - [ ] Один `doPost` с роутером; вебхук с ключом в адресе и `max_connections=1`; ответы Telegram через `HtmlService`; `LAST_UPDATE_ID`.
 - [ ] Кнопка меню бота «Касса» → адрес Mini App на GitHub Pages (`setChatMenuButton`).
 - [ ] Проверка `initData`; минимальный Mini App: одна продажа.
