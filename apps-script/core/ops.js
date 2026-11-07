@@ -773,6 +773,43 @@ var Ops = (function () {
     plan.result = { staff_id: s.staff_id };
   };
 
+  /**
+   * Исправить запись в ЗАКРЫТОЙ смене (ТЗ «Исправить запись», решение D7/D26) — владелица или администратор.
+   * Ошибочный чек снимается обратной записью: товар возвращается, долг по чеку снимается, чек исключается
+   * из выручки той смены. Факты по наличным (пересчёт, выданная ЗП, изъятие, остаток) не меняются.
+   * Отчёт смены пересчитывается с пометкой «исправлено», разница по ЗП видна как «к доплате / переплачено».
+   * Верный чек (если нужен) проводится обычной продажей в текущей смене.
+   */
+  H.correction = function (view, p, plan) {
+    requireOwner(view);
+    var r = view.receipt(p.receipt_id);
+    if (!r || r.status !== 'posted') throw opsError('UNKNOWN_RECEIPT', 'Чек не найден или уже отменён');
+    var shift = view.rows('shifts').filter(function (s) { return s.shift_id === r.shift_id; })[0];
+    if (!shift || shift.status !== 'closed') throw opsError('SHIFT_OPEN', 'Смена этого чека ещё открыта — чек отменяет флорист кнопкой «Отменить продажу»');
+    var reason = text(p.reason, 'причина', 200);
+    var money = receiptMoney(view, r.receipt_id);
+    if (money.refunded > 0) throw opsError('HAS_REFUNDS', 'По чеку уже был возврат — исправьте вручную вместе с администратором');
+    if (money.debt > 0 && view.debtOf(r.customer_id) < money.debt) throw opsError('DEBT_REPAID', 'Долг по чеку уже начали гасить');
+    plan.shift_id = shift.shift_id; // отметка «исправлено» для отчёта этой смены
+    view.rows('stock_moves').forEach(function (m) {
+      if (m.receipt_id !== r.receipt_id || m.type !== 'sale') return;
+      add(plan, view, 'stock_moves', {
+        move_id: nextId(plan, 'mv'), shift_id: '', type: 'cancel', item_id: m.item_id,
+        qty: -m.qty, cost_sum: '', supplier_or_reason: 'исправление: ' + reason, receipt_id: r.receipt_id
+      });
+      touchStock(plan, m.item_id);
+    });
+    if (money.debt) {
+      add(plan, view, 'debt_moves', {
+        debt_move_id: nextId(plan, 'dm'), shift_id: '', customer_id: r.customer_id,
+        type: 'cancel', amount: -money.debt, receipt_id: r.receipt_id, since_date: '', comment: 'исправление: ' + reason
+      });
+    }
+    update(plan, 'receipts', { receipt_id: r.receipt_id }, r, { status: 'cancelled' });
+    plan.notify.push({ to: 'owner', kind: 'shift_report', shift_id: shift.shift_id });
+    plan.result = { receipt_id: r.receipt_id, shift_id: shift.shift_id, shift_no: shift.shift_no };
+  };
+
   H.owner_expense = function (view, p, plan) {
     requireOwner(view);
     var month = p.month;
@@ -844,7 +881,10 @@ var Ops = (function () {
       refunds_cash: sumWhere(n.payments, function (p) { return p.kind === 'refund' && p.method === 'cash'; }),
       refunds_card: sumWhere(n.payments, function (p) { return p.kind === 'refund' && p.method === 'card'; }),
       replaced_qty: moves.filter(function (m) { return m.type === 'replace'; }).reduce(function (a, m) { return a - m.qty; }, 0),
-      open_cash: shift.open_cash, open_diff: shift.open_diff, calc_cash: n.calc_cash,
+      open_cash: shift.open_cash, open_diff: shift.open_diff,
+      // У закрытой смены расчёт кассы — зафиксированный при закрытии (наличные факты не меняются, D7).
+      calc_cash: shift.status === 'closed' && typeof shift.calc_cash === 'number' ? shift.calc_cash : n.calc_cash,
+      corrected: view.rows('ops_log').filter(function (o) { return o.kind === 'correction' && o.shift_id === shiftId; }).length,
       counted_cash: shift.counted_cash, cash_diff: shift.cash_diff, next_cash: shift.next_cash,
       card_total: n.card_total,
       payroll: staff.map(function (s) {

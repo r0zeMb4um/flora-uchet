@@ -184,6 +184,11 @@ function runScenario(seed, steps) {
           if (R() < 0.7) post(who, 'preorder', { reservation_id: x.reservation_id, payments: [{ method: pick(['cash', 'card']), amount: int(1, x.total) }] });
           else post(who, 'reserve_cancel', { reservation_id: x.reservation_id });
         }
+      } else if (R() < 0.5) {
+        // Исправление чека в закрытой смене (D26).
+        const closedIds = new Set(v.rows('shifts').filter((x) => x.status === 'closed').map((x) => x.shift_id));
+        const old = myReceipts.filter((x) => x.status === 'posted' && closedIds.has(x.shift_id));
+        if (old.length) post('s_owner', 'correction', { receipt_id: pick(old).receipt_id, reason: 'ошибка' });
       } else {
         const item = post(who, 'new_item', { category: 'flowers', name: 'Новая ' + int(1, 3), sale_price: int(100, 3000), confirm_new: R() < 0.5 });
         if (item) ITEMS.push(item.result.item_id);
@@ -227,8 +232,12 @@ function checkInvariants(store, v, seed, log) {
       assert.equal(s.next_cash, s.counted_cash - paid - s.close_withdrawal, 'остаток на следующую смену ' + where());
       assert.equal(s.cash_diff, s.counted_cash - s.calc_cash, where());
       assert.equal(r.calc_cash, s.calc_cash, 'расчёт кассы не меняется после закрытия ' + where());
-      assert.equal(paid + unpaid, s.payroll_total, 'выдано + к доплате = начислено ' + where());
-      assert.equal(unpaid, s.payroll_unpaid, where());
+      if (!r.corrected) {
+        assert.equal(paid + unpaid, s.payroll_total, 'выдано + к доплате = начислено ' + where());
+        assert.equal(unpaid, s.payroll_unpaid, where());
+      } else {
+        assert.ok(r.revenue >= 0, where());
+      }
       assert.ok(s.next_cash >= 0, where());
       prevNext = s.next_cash;
     }
@@ -269,7 +278,7 @@ test('случайные смены: 40 сценариев × 250 шагов, о
   }
   // Каждая операция реально проводилась, а не только получала отказы.
   for (const kind of ['sale', 'bouquet', 'preorder', 'preorder_assemble', 'preorder_pickup', 'preorder_cancel', 'reserve', 'reserve_cancel',
-    'income', 'new_item', 'defect', 'refund', 'cancel', 'debt_repay', 'cash_out', 'withdrawal', 'pay_adjust', 'inventory', 'close_shift', 'open_shift']) {
+    'income', 'new_item', 'defect', 'refund', 'cancel', 'debt_repay', 'cash_out', 'withdrawal', 'pay_adjust', 'inventory', 'close_shift', 'open_shift', 'correction']) {
     assert.ok(done[kind] > 0, 'ни разу не проведено: ' + kind + ' ' + JSON.stringify(done));
   }
   // Сценарии должны реально что-то проводить, а не упираться в отказы.

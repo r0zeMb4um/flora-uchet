@@ -27,7 +27,8 @@ var Reports = (function () {
     var item = function (id) { return esc((names.items || {})[id] || id); };
     var person = function (id) { return esc((names.staff || {})[id] || id); };
     var L = [];
-    L.push('<b>Смена №' + r.shift_no + '</b> · ' + dateRu(r.shift_date) + ' · ' + r.florists.map(esc).join(', '));
+    L.push('<b>Смена №' + r.shift_no + '</b> · ' + dateRu(r.shift_date) + ' · ' + r.florists.map(esc).join(', ') +
+      (r.corrected ? ' · <b>ИСПРАВЛЕНО</b> (' + r.corrected + ')' : ''));
     L.push('');
     L.push('<b>ВЫРУЧКА: ' + money(r.revenue) + '</b> (чеков: ' + r.receipts_count + ')');
     var rev = parts([['нал', r.sales_cash], ['безнал', r.sales_card], ['в долг', r.sales_debt], ['предзаказы к доплате', r.preorder_unpaid]]);
@@ -53,7 +54,8 @@ var Reports = (function () {
     L.push('<b>ЗАРПЛАТА</b>');
     r.payroll.forEach(function (p) {
       var line = '  ' + person(p.staff_id) + ': ставка ' + money(p.rate) + ' + % ' + money(p.pct) + ' = ' + money(p.total);
-      if (p.unpaid) line += ' — <b>к доплате ' + money(p.unpaid) + '</b>';
+      if (p.unpaid > 0) line += ' — <b>к доплате ' + money(p.unpaid) + '</b>';
+      if (p.unpaid < 0) line += ' — <b>переплачено ' + money(-p.unpaid) + '</b> (решает владелица)';
       L.push(line);
     });
     var exp = parts([['доставка', r.delivery], ['прочее', r.other], ['доплаты ЗП', r.pay_adjust]]);

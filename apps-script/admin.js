@@ -43,3 +43,28 @@ function anonymizeCustomer() {
     { op_id: 'anon-' + found[0].customer_id, kind: 'anonymize', payload: { customer_id: found[0].customer_id } });
   Logger.log('Обезличен: ' + found[0].customer_id + '. Долг и суммы в отчётах сохранены.');
 }
+
+/**
+ * Исправить чек в ЗАКРЫТОЙ смене (D26): найти по номеру смены и номеру чека.
+ * Сначала запустите с CONFIRM = false — функция покажет чек. Потом CONFIRM = true — исправит и пришлёт владелице отчёт.
+ */
+function correctReceipt() {
+  var SHIFT_NO = 0;          // ← номер смены
+  var RECEIPT_NO = 0;        // ← номер чека в смене
+  var REASON = '';           // ← причина, например «чек проведён дважды»
+  var CONFIRM = false;       // ← true — исправить
+  var CLIENT_ID = 'c1';
+  var POINT_ID = 'p1';
+  var store = SheetsStore.open();
+  var shift = store.rows('shifts').filter(function (s) { return s.client_id === CLIENT_ID && s.point_id === POINT_ID && s.shift_no === SHIFT_NO; })[0];
+  if (!shift) return Logger.log('Смена №' + SHIFT_NO + ' не найдена');
+  var r = store.rows('receipts').filter(function (x) { return x.shift_id === shift.shift_id && x.receipt_no === RECEIPT_NO; })[0];
+  if (!r) return Logger.log('Чек №' + RECEIPT_NO + ' в смене №' + SHIFT_NO + ' не найден');
+  Logger.log('Чек №' + r.receipt_no + ': ' + r.type + ', итого ' + r.total + ' ₸, в долг ' + r.debt_amount + ' ₸, статус ' + r.status + ', ' + r.created_at);
+  if (!CONFIRM) return Logger.log('Это тот чек? Поставьте CONFIRM = true и запустите ещё раз.');
+  var owner = store.rows('staff').filter(function (s) { return s.client_id === CLIENT_ID && s.role === 'owner'; })[0];
+  var res = Posting.post(store, { client_id: CLIENT_ID, point_id: POINT_ID, staff_id: owner ? owner.staff_id : 'admin', role: 'admin', now: nowIso() },
+    { op_id: 'corr-' + r.receipt_id, kind: 'correction', payload: { receipt_id: r.receipt_id, reason: REASON } });
+  Webhook.notify(store, CLIENT_ID, res.notify);
+  Logger.log('Исправлено. Владелице отправлен пересчитанный отчёт смены №' + SHIFT_NO + '.');
+}

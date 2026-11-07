@@ -571,3 +571,42 @@ test('обезличивание: имя стёрто, долг и отчёты 
   const m = w.store.tables.staff.find((x) => x.staff_id === 's_mira');
   assert.deepEqual([m.name, m.telegram_id, m.active], ['Сотрудник (обезличен)', '', false]);
 });
+
+// ---------- этап E: исправление записи в закрытой смене (D26) ----------
+
+test('исправление: чек в закрытой смене снят, выручка и % пересчитаны, наличные факты не тронуты, «переплачено»', () => {
+  const Reports = require('../apps-script/bot/reports.js');
+  const w = world();
+  const { yesterdayReceipt } = startAndYesterday(w);
+  const shiftId = goldenShift(w, yesterdayReceipt);
+  const before = Ops.shiftReport(w.view(), shiftId);
+  // Чек №4 (мишка в долг Айгуль, 4 500) провели по ошибке.
+  const r4 = w.store.tables.receipts.find((r) => r.shift_id === shiftId && r.receipt_no === 4);
+  assert.throws(() => w.post('s_anna', 'correction', { receipt_id: r4.receipt_id, reason: 'ошибка' }), { code: 'FORBIDDEN' });
+  const res = w.post('s_owner', 'correction', { receipt_id: r4.receipt_id, reason: 'проведён по ошибке' });
+  assert.deepEqual(res.notify.map((n) => n.kind), ['shift_report']);
+  const after = Ops.shiftReport(w.view(), shiftId);
+  assert.equal(after.revenue, 65400);
+  assert.equal(after.corrected, 1);
+  assert.equal(after.calc_cash, before.calc_cash, 'наличные факты не меняются');
+  assert.equal(after.cash_diff, before.cash_diff);
+  assert.equal(after.next_cash, before.next_cash);
+  // % каждой: round(65 400 × 3% / 2) = 981; выдано 1 049 → переплачено 68.
+  assert.deepEqual(after.payroll.map((p) => [p.pct, p.paid, p.unpaid]), [[981, 6049, -68], [981, 6049, -68]]);
+  assert.equal(w.view().debtOf(w.customerId('Айгуль')), 0);
+  assert.equal(w.view().stock('toy_bear'), 5);
+  const v = w.view();
+  const names = { items: {}, staff: {} };
+  v.rows('staff').forEach((s) => { names.staff[s.staff_id] = s.name; });
+  const t = Reports.shiftText(after, names).replace(/ /g, ' ');
+  assert.ok(t.includes('<b>ИСПРАВЛЕНО</b> (1)'));
+  assert.ok(t.includes('Анна: ставка 5 000 ₸ + % 981 ₸ = 5 981 ₸ — <b>переплачено 68 ₸</b>'));
+  assert.throws(() => w.post('s_owner', 'correction', { receipt_id: r4.receipt_id, reason: 'ещё раз' }), { code: 'UNKNOWN_RECEIPT' });
+});
+
+test('исправление в открытой смене не делается — для этого «Отменить продажу»', () => {
+  const w = world();
+  openGolden(w);
+  const r = w.post('s_anna', 'sale', SALE);
+  assert.throws(() => w.post('s_owner', 'correction', { receipt_id: r.result.receipt_id, reason: 'x' }), { code: 'SHIFT_OPEN' });
+});
