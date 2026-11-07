@@ -1,0 +1,121 @@
+/**
+ * Хранилище на Google Таблице: тот же интерфейс, что у хранилища в памяти из тестов
+ * (rows, find, append, update, withLock), поэтому core/ops.js и core/posting.js работают без изменений.
+ *
+ * Чтение листа — один вызов getValues() на запрос (кэш в пределах одного запуска скрипта).
+ * Запись — одна пачка setValues() на лист.
+ */
+var SheetsStore = (function () {
+  'use strict';
+
+  function open() {
+    var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    if (!id) throw new Error('Не задан SPREADSHEET_ID — сначала запустите setup()');
+    return create(SpreadsheetApp.openById(id));
+  }
+
+  function create(ss) {
+    var memo = {};
+
+    function sheetOf(name) {
+      var sh = ss.getSheetByName(name);
+      if (!sh) throw new Error('Нет листа ' + name + ' — запустите setup()');
+      return sh;
+    }
+
+    function fromCell(v, type) {
+      if (v === '' || v === null) return '';
+      if (type === 'n') return Number(v);
+      if (type === 'b') return v === true || v === 'TRUE';
+      if (v instanceof Date) {
+        return Utilities.formatDate(v, 'Asia/Almaty', "yyyy-MM-dd'T'HH:mm:ssXXX"); // страховка: колонки текстовые
+      }
+      return String(v);
+    }
+
+    function toCell(v) {
+      return v === undefined || v === null ? '' : v;
+    }
+
+    /** Все строки листа как объекты (+ _row — номер строки в листе). */
+    function load(name) {
+      if (memo[name]) return memo[name];
+      var cols = Schema.SHEETS[name];
+      var sh = sheetOf(name);
+      var last = sh.getLastRow();
+      var out = [];
+      if (last >= 2) {
+        var values = sh.getRange(2, 1, last - 1, cols.length).getValues();
+        for (var i = 0; i < values.length; i++) {
+          var obj = { _row: i + 2 };
+          for (var j = 0; j < cols.length; j++) obj[cols[j].name] = fromCell(values[i][j], cols[j].type);
+          out.push(obj);
+        }
+      }
+      memo[name] = out;
+      return out;
+    }
+
+    function strip(r) {
+      var c = {};
+      Object.keys(r).forEach(function (k) { if (k !== '_row') c[k] = r[k]; });
+      return c;
+    }
+
+    function matches(row, match) {
+      return Object.keys(match).every(function (k) { return row[k] === match[k]; });
+    }
+
+    return {
+      spreadsheet: ss,
+      rows: function (name) { return load(name).map(strip); },
+      find: function (name, field, value) {
+        return load(name).filter(function (r) { return r[field] === value; }).map(strip);
+      },
+      append: function (name, rows) {
+        if (!rows.length) return;
+        var headers = Schema.headers(name);
+        rows.forEach(function (r) { Schema.check(name, r); });
+        var values = rows.map(function (r) { return headers.map(function (h) { return toCell(r[h]); }); });
+        var sh = sheetOf(name);
+        var start = sh.getLastRow() + 1;
+        sh.getRange(start, 1, values.length, headers.length).setValues(values);
+        var cached = load(name);
+        rows.forEach(function (r, i) {
+          var o = { _row: start + i };
+          headers.forEach(function (h) { o[h] = r[h] === undefined ? '' : r[h]; });
+          cached.push(o);
+        });
+      },
+      update: function (name, match, set) {
+        Schema.check(name, set);
+        var headers = Schema.headers(name);
+        var sh = sheetOf(name);
+        load(name).forEach(function (r) {
+          if (!matches(r, match)) return;
+          Object.keys(set).forEach(function (k) { r[k] = set[k]; });
+          sh.getRange(r._row, 1, 1, headers.length).setValues([headers.map(function (h) { return toCell(r[h]); })]);
+        });
+      },
+      withLock: function (fn) {
+        var lock = LockService.getScriptLock();
+        if (!lock.tryLock(10000)) {
+          var e = new Error('Касса занята, нажмите ещё раз');
+          e.code = 'BUSY';
+          throw e;
+        }
+        try {
+          memo = {}; // под блокировкой читаем свежие данные
+          return fn();
+        } finally {
+          SpreadsheetApp.flush();
+          lock.releaseLock();
+        }
+      },
+      /** Сбросить кэш чтения (после чужих записей). */
+      refresh: function () { memo = {}; }
+    };
+  }
+
+  return { open: open, create: create };
+})();

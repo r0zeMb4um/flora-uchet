@@ -12,7 +12,8 @@
 - [x] Apps Script API включён: https://script.google.com/home/usersettings → «Google Apps Script API» → Вкл.
 - [x] clasp 3.4.1 установлен, вход от flora.uchet.kz@gmail.com. В PowerShell запускать через `npx.cmd @google/clasp@3.4.1 …` (скрипты .ps1 запрещены политикой Windows).
 - [x] Бот создан в @BotFather (@flora_uchet_bot) (`/newbot`). Токен не вставлять в чат и файлы — только в Script Properties.
-- [ ] GitHub: аккаунт r0zeMb4um есть; включить двухэтапную проверку; создать репозиторий flora-uchet.
+- [x] GitHub: аккаунт r0zeMb4um, двухэтапная проверка включена.
+- [ ] Репозиторий flora-uchet на GitHub (создадим при публикации Mini App).
 
 **Нужно к началу этапа C.**
 
@@ -30,9 +31,10 @@
 **Проверка:** `npm test` зелёный; отчёт смены из симуляции совпадает с эталоном.
 
 ## C. Сквозной прототип (первый контакт с Google и Telegram)
-- [ ] `setup()`: все листы и заголовки из `docs/DATA_MODEL.md`, тестовые данные, защита листов.
+- [x] `setup()`: все листы и заголовки из `infra/schema.js` (= `docs/DATA_MODEL.md`), форматы, защита, тестовый магазин, приглашения. Таблица «Флора·Учёт — пилот» создана в аккаунте проекта.
 - [x] Проведение (`core/posting.js`: блокировка, `pending → posted`, дописывание по сохранённому плану, пересчёт остатков, `failStale`, `reconcileStock`) — готово на этапе B.
-- [ ] Адаптер листов (`infra/`): блокировка, `pending → posted`, дописывание, `stock_balance`, кэш.
+- [x] Адаптер листов (`infra/sheets.js`, схема `infra/schema.js`; симуляция сверяет каждую запись со схемой)
+- [ ] ~~Адаптер листов (`infra/`): блокировка, `pending → posted`, дописывание, `stock_balance`, кэш.
 - [ ] Один `doPost` с роутером; вебхук с ключом в адресе и `max_connections=1`; ответы Telegram через `HtmlService`; `LAST_UPDATE_ID`.
 - [ ] Кнопка меню бота «Касса» → адрес Mini App на GitHub Pages (`setChatMenuButton`).
 - [ ] Проверка `initData`; минимальный Mini App: одна продажа.
