@@ -13,7 +13,7 @@
 - [x] clasp 3.4.1 установлен, вход от flora.uchet.kz@gmail.com. В PowerShell запускать через `npx.cmd @google/clasp@3.4.1 …` (скрипты .ps1 запрещены политикой Windows).
 - [x] Бот создан в @BotFather (@flora_uchet_bot) (`/newbot`). Токен не вставлять в чат и файлы — только в Script Properties.
 - [x] GitHub: аккаунт r0zeMb4um, двухэтапная проверка включена.
-- [ ] Репозиторий flora-uchet на GitHub (создадим при публикации Mini App).
+- [x] Репозиторий https://github.com/r0zeMb4um/flora-uchet, публикация Mini App через GitHub Actions.
 
 **Нужно к началу этапа C.**
 

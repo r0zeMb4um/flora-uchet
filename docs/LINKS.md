@@ -37,6 +37,7 @@ Claude Code эти ссылки не читает — всё нужное уже
 | --- | --- |
 | Google-аккаунт проекта | flora.uchet.kz@gmail.com |
 | Telegram-бот | @flora_uchet_bot (https://t.me/flora_uchet_bot) |
-| GitHub | https://github.com/r0zeMb4um (репозиторий flora-uchet — создать) |
+| GitHub | https://github.com/r0zeMb4um/flora-uchet (публичный, решение D15) |
+| Mini App (касса) | https://r0zemb4um.github.io/flora-uchet/ |
 
 Токен бота, пароли и ключи сюда **не записываются** — только в Script Properties и менеджер паролей.
