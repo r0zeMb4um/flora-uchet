@@ -1,6 +1,6 @@
 {
   "description": "Эталонная смена №214 из ТЗ. Все суммы — целые тенге, проценты — сотые доли (300 = 3%).",
-  "settings": { "change_fund": 5000, "rent_per_day": 4000, "timezone": "Asia/Almaty" },
+  "settings": { "change_fund": 5000, "timezone": "Asia/Almaty" },
   "staff": [
     { "staff_id": "s_anna", "name": "Анна", "role": "florist", "shift_rate": 5000, "pct_bp": 300 },
     { "staff_id": "s_mira", "name": "Мира", "role": "florist", "shift_rate": 5000, "pct_bp": 300 }
@@ -42,7 +42,7 @@
     { "op": "debt_repay", "customer": "Ерлан", "method": "cash", "amount": 3000, "note": "старый долг, уже есть в базе" },
     { "op": "refund", "method": "cash", "amount": 2000, "note": "по чеку вчерашней смены" },
     { "op": "cash_out", "type": "delivery", "amount": 2500 },
-    { "op": "cash_out", "type": "rent", "amount": 4000 },
+    { "op": "cash_out", "type": "other", "amount": 4000, "comment": "прочий расход (раньше — аренда, см. D11)" },
     { "op": "inventory", "facts": { "rose_red_60": 74 } },
     { "op": "count_cash", "counted": 32498 },
     { "op": "withdrawal_close", "amount": 10000 }

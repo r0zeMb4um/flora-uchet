@@ -21,6 +21,7 @@
 | tariff | str | start / pro / pilot |
 | paid_until | date | 2026-12-06 |
 | timezone | str | Asia/Almaty |
+| admin_finance_access | bool | TRUE — администратор видит финансы клиента; выключает только администратор (D16) |
 
 ### `points` — точки
 | Колонка | Тип | Пример |
@@ -35,7 +36,7 @@
 | --- | --- | --- |
 | client_id, point_id | str | c1, p1 |
 | change_fund | int ₸ | 5000 — размен, всегда лежит в кассе |
-| rent_per_day | int ₸ | 4000 |
+| expense_items | str | статьи постоянных расходов владелицы через «;»: Аренда;Коммуналка;Интернет (D11) |
 | reminder_time | str | 22:00 |
 | cash_tolerance | int ₸ | 0 |
 
@@ -100,7 +101,7 @@
 | --- | --- | --- |
 | op_id | str (UUID) | уникальный |
 | client_id, point_id, shift_id | str | |
-| kind | enum | open_shift / sale / bouquet / preorder / reserve / reserve_cancel / preorder_assemble / preorder_pickup / income / defect / refund / cancel / debt_repay / debt_opening / stock_start / cash_out / withdrawal / inventory / close_shift / correction / pay_adjust / new_item / catalog_edit / staff_edit / settings_edit / invite_create / join / anonymize |
+| kind | enum | open_shift / sale / bouquet / preorder / reserve / reserve_cancel / preorder_assemble / preorder_pickup / income / defect / refund / cancel / debt_repay / debt_opening / stock_start / cash_out / withdrawal / inventory / close_shift / correction / pay_adjust / new_item / catalog_edit / staff_edit / settings_edit / invite_create / join / anonymize / owner_expense |
 | actor_staff_id | str | s_anna |
 | status | enum | pending / posted / failed |
 | created_at, posted_at | datetime | |
@@ -234,10 +235,25 @@
 | --- | --- | --- |
 | cash_id, op_id | str | |
 | client_id, point_id, shift_id | str | |
-| type | enum | delivery / rent / other / rate / pct / pay_adjust / withdrawal_day / withdrawal_close |
+| type | enum | delivery / other / rate / pct / pay_adjust / withdrawal_day / withdrawal_close (аренды нет — D11) |
 | amount | int ₸ | > 0, всегда расход из кассы |
 | staff_id | str | для rate, pct и pay_adjust (доплата ЗП после исправления, D7) |
 | comment | str | |
+
+### `owner_expenses` — постоянные расходы владелицы по месяцам (решение D11)
+Вносит только владелица. Не касса: деньги платятся не из ларька. Вычитаются только в прибыли месяца.
+
+| Колонка | Тип | Пример |
+| --- | --- | --- |
+| expense_id, op_id | str | |
+| client_id, point_id | str | |
+| month | str | 2026-11 |
+| item | str | Аренда (статья из `settings.expense_items`) |
+| amount | int ₸ | 120000; > 0, кроме строки-исправления (отрицательная) |
+| comment | str | |
+| created_by | str | staff_id владелицы |
+
+Исправление — обратной строкой с отрицательной суммой и ссылкой на исправляемую в `comment`.
 
 ### `audit` — журнал действий
 | Колонка | Тип |
