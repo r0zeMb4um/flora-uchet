@@ -19,6 +19,8 @@ function connectBot() {
     url: url, max_connections: 1, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true
   });
   Tg.call('setMyCommands', { commands: [{ command: 'start', description: 'Меню' }] });
+  // Кнопка «Касса» слева от поля ввода — открывает Mini App.
+  Tg.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Касса', web_app: { url: MINIAPP_URL } } });
   var me = Tg.call('getMe');
   props.setProperty('BOT_USERNAME', me.username);
 

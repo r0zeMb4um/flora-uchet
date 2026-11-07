@@ -148,7 +148,7 @@ var Webhook = (function () {
       lines.push('Отчёты и настройки появятся на следующем этапе.');
       keyboard = [['Меню']];
     } else if (shift) {
-      lines.push('Открыта смена №' + shift.shift_no + '. Продажи — в Mini App (подключаем на этапе C).');
+      lines.push('Открыта смена №' + shift.shift_no + '. Продажи — в кассе: кнопка «Касса» слева от поля ввода.');
       keyboard = [['Меню']];
     } else {
       lines.push('Смена не открыта.');

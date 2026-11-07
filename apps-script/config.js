@@ -4,3 +4,4 @@
  * Развёртывание всегда обновляется по этому ID (clasp redeploy), чтобы адрес не менялся.
  */
 var DEPLOYMENT_ID = 'AKfycbzZ--Fx478f_15KKxB90RPNMuuzYKyP7nOb_Prl31t4Oy8cumSOw9noB-d76_pFqPTf';
+var MINIAPP_URL = 'https://r0zemb4um.github.io/flora-uchet/';
