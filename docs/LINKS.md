@@ -31,3 +31,12 @@ Claude Code эти ссылки не читает — всё нужное уже
 | --- | --- |
 | Персональные данные и локализация, 2026 | https://uppersetup.com/en/blog/personal-data-and-localisation-in-kazakhstan-in-2026-law-no |
 | Онлайн-кассы в 2026 | https://uppersetup.com/ru/blog/online-cash-registers-in-kazakhstan-in-2026-who-must-use-a |
+
+## Аккаунты проекта (без секретов)
+| Что | Значение |
+| --- | --- |
+| Google-аккаунт проекта | flora.uchet.kz@gmail.com |
+| Telegram-бот | @flora_uchet_bot (https://t.me/flora_uchet_bot) |
+| GitHub | — (ещё не создан) |
+
+Токен бота, пароли и ключи сюда **не записываются** — только в Script Properties и менеджер паролей.
