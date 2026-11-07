@@ -810,6 +810,41 @@ var Ops = (function () {
     plan.result = { receipt_id: r.receipt_id, shift_id: shift.shift_id, shift_no: shift.shift_no };
   };
 
+  /** Каталог (владелица): цена-подсказка, минимальный остаток, статус (подтвердить «на проверке», скрыть, вернуть). */
+  H.catalog_edit = function (view, p, plan) {
+    requireOwner(view);
+    var it = view.item(p.item_id);
+    if (!it) throw opsError('UNKNOWN_ITEM', 'Нет такой позиции');
+    var set = {};
+    if (p.sale_price !== undefined) set.sale_price = posInt(p.sale_price, 'цена продажи');
+    if (p.min_stock !== undefined) set.min_stock = nonNegInt(p.min_stock, 'минимальный остаток');
+    if (p.status !== undefined) set.status = oneOf(p.status, ['active', 'hidden'], 'статус');
+    if (p.name !== undefined) set.name = text(p.name, 'название', 80);
+    if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
+    update(plan, 'catalog', { item_id: it.item_id, client_id: plan.client_id }, it, set);
+    plan.result = { item_id: it.item_id, set: set };
+  };
+
+  /** Настройки точки (владелица): размен, время напоминания, статьи расходов месяца. */
+  H.settings_edit = function (view, p, plan) {
+    requireOwner(view);
+    var st = view.settings();
+    var set = {};
+    if (p.change_fund !== undefined) set.change_fund = nonNegInt(p.change_fund, 'размен');
+    if (p.reminder_time !== undefined) {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(p.reminder_time))) throw opsError('BAD_INPUT', 'Время в виде ЧЧ:ММ, например 22:00');
+      set.reminder_time = p.reminder_time;
+    }
+    if (p.expense_items !== undefined) {
+      var items = String(p.expense_items).split(/[;,\n]/).map(function (x) { return x.trim(); }).filter(Boolean);
+      if (!items.length || items.some(function (x) { return x.length > 40; })) throw opsError('BAD_INPUT', 'Статьи через запятую, каждая до 40 символов');
+      set.expense_items = items.join(';');
+    }
+    if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
+    update(plan, 'settings', { client_id: plan.client_id, point_id: plan.point_id }, st, set);
+    plan.result = { set: set };
+  };
+
   H.owner_expense = function (view, p, plan) {
     requireOwner(view);
     var month = p.month;

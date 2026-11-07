@@ -32,9 +32,11 @@ var ChatFlows = (function () {
     'Отчёт за смену': 'report',
     'Отчёт за период': 'period',
     'Остатки': 'stock',
-    'Должники': 'debtors'
+    'Должники': 'debtors',
+    'Каталог': 'catalog',
+    'Настройки': 'settings'
   };
-  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true, period: true, stock: true, debtors: true };
+  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true, period: true, stock: true, debtors: true, catalog: true, settings: true };
   var CANCEL_ROW = [{ text: 'Отмена', callback_data: 'f:x' }];
 
   function money(n) {
@@ -281,6 +283,29 @@ var ChatFlows = (function () {
           return [{ text: r.pickup_date.slice(8, 10) + '.' + r.pickup_date.slice(5, 7) + ' · ' + (c ? c.name : '') + ' · ' + money(r.total), callback_data: 'o:p:' + r.receipt_id }];
         }).concat([CANCEL_ROW]));
       }
+      if (st.flow === 'catalog') {
+        st.step = 'pick';
+        deps.state.set(st);
+        var cat = view.rows('catalog').slice().sort(function (a, b) {
+          var ra = a.status === 'review' ? 0 : a.status === 'active' ? 1 : 2;
+          var rb = b.status === 'review' ? 0 : b.status === 'active' ? 1 : 2;
+          return ra - rb || (a.name < b.name ? -1 : 1);
+        });
+        var review = cat.filter(function (c) { return c.status === 'review'; }).length;
+        return deps.send('Каталог' + (review ? ' — на проверке: ' + review + ' (сверху)' : '') + '. Выберите позицию:', cat.slice(0, 60).map(function (c) {
+          var mark = c.status === 'review' ? '⚠️ ' : c.status === 'hidden' ? '🚫 ' : '';
+          return [{ text: mark + c.name + ' · ' + money(c.sale_price) + ' · мин. ' + c.min_stock, callback_data: 'o:ci:' + c.item_id }];
+        }).concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'settings') {
+        var se = view.settings();
+        st.step = 'pick';
+        deps.state.set(st);
+        return deps.send('Настройки точки:\nРазмен (всегда в кассе): ' + money(se.change_fund) + '\nНапоминание о незакрытой смене: ' + (se.reminder_time || '22:00') +
+          '\nСтатьи расходов месяца: ' + esc(String(se.expense_items || '').split(';').join(', ')) + '\n\nЧто изменить?', [
+          [{ text: 'Размен', callback_data: 'o:se:change_fund' }], [{ text: 'Время напоминания', callback_data: 'o:se:reminder_time' }],
+          [{ text: 'Статьи расходов', callback_data: 'o:se:expense_items' }], CANCEL_ROW]);
+      }
       if (st.flow === 'stock') return deps.send(R().stockText(S.stock(view), view.ctx.now));
       if (st.flow === 'debtors') return deps.send(R().debtorsText(S.debtors(view)));
       if (st.flow === 'period') {
@@ -382,6 +407,32 @@ var ChatFlows = (function () {
         st.step = 'reason'; deps.state.set(st);
         return deps.send('Причина отмены?', [CANCEL_ROW]);
       }
+      if (st.flow === 'catalog' && data.indexOf('o:ci:') === 0) {
+        var it = view.item(data.slice(5));
+        if (!it) return deps.send('Позиция не найдена.');
+        st.d = { item_id: it.item_id, name: it.name, status: it.status };
+        st.step = 'act'; deps.state.set(st);
+        var acts = [];
+        if (it.status === 'review') acts.push([{ text: '✅ Подтвердить позицию', callback_data: 'o:ca:active' }]);
+        acts.push([{ text: 'Цена продажи', callback_data: 'o:ca:price' }, { text: 'Минимальный остаток', callback_data: 'o:ca:min' }]);
+        acts.push([it.status === 'hidden' ? { text: 'Вернуть в продажу', callback_data: 'o:ca:active' } : { text: 'Скрыть из продажи', callback_data: 'o:ca:hidden' }]);
+        return deps.send(esc(it.name) + '\nЦена ' + money(it.sale_price) + ' · закупка ' + money(it.last_cost) + ' · мин. остаток ' + it.min_stock +
+          ' · ' + (it.status === 'review' ? 'на проверке' : it.status === 'hidden' ? 'скрыта' : 'в продаже'), acts.concat([CANCEL_ROW]));
+      }
+      if (st.flow === 'catalog' && st.step === 'act' && data.indexOf('o:ca:') === 0) {
+        var a = data.slice(5);
+        if (a === 'price' || a === 'min') { d.field = a; st.step = 'value'; deps.state.set(st); return deps.send(a === 'price' ? 'Новая цена продажи, ₸?' : 'Минимальный остаток, шт?', [CANCEL_ROW]); }
+        d.req = { kind: 'catalog_edit', payload: { item_id: d.item_id, status: a } };
+        d.what = a;
+        return confirm(st, deps);
+      }
+      if (st.flow === 'settings' && data.indexOf('o:se:') === 0) {
+        st.d = { field: data.slice(5) };
+        st.step = 'value'; deps.state.set(st);
+        var ask = { change_fund: 'Размен, ₸? Например: 5000', reminder_time: 'Время напоминания ЧЧ:ММ? Например: 21:30',
+          expense_items: 'Статьи расходов через запятую? Например: Аренда, Коммуналка, Интернет, Налоги' };
+        return deps.send(ask[st.d.field] || 'Значение?', [CANCEL_ROW]);
+      }
       if (st.flow === 'period' && data.indexOf('o:pd:') === 0) {
         deps.state.clear();
         var range = Owner.range(view.ctx.now.slice(0, 10), data.slice(5));
@@ -430,6 +481,26 @@ var ChatFlows = (function () {
         d.req = { kind: 'owner_expense', payload: { month: d.month, item: d.item, amount: a } };
         return confirm(st, deps);
       }
+      if (st.flow === 'catalog' && st.step === 'value') {
+        var n = d.field === 'min' ? (/^\d{1,6}$/.test(t) ? Number(t) : null) : intOf(t);
+        if (n === null) return deps.send('Число цифрами.');
+        d.value = n;
+        d.req = { kind: 'catalog_edit', payload: d.field === 'price' ? { item_id: d.item_id, sale_price: n } : { item_id: d.item_id, min_stock: n } };
+        return confirm(st, deps);
+      }
+      if (st.flow === 'settings' && st.step === 'value') {
+        var payload = {};
+        if (d.field === 'change_fund') {
+          if (!/^\d{1,9}$/.test(t.replace(/\s/g, ''))) return deps.send('Сумма цифрами, например: 5000');
+          payload.change_fund = Number(t.replace(/\s/g, ''));
+        } else if (d.field === 'reminder_time') {
+          if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) return deps.send('Время ЧЧ:ММ, например: 21:30');
+          payload.reminder_time = t;
+        } else payload.expense_items = t;
+        d.value = t;
+        d.req = { kind: 'settings_edit', payload: payload };
+        return confirm(st, deps);
+      }
       if (st.flow === 'preorders' && st.step === 'reason') {
         if (!t) return deps.send('Напишите причину.');
         d.reason = t.slice(0, 200);
@@ -476,6 +547,14 @@ var ChatFlows = (function () {
       if (st.flow === 'staff') {
         return (d.what === 'o:inv' ? 'Новая ссылка для ' : d.what === 'o:off' ? 'Отключить доступ: ' : 'Вернуть доступ: ') + '<b>' + esc(d.name) + '</b>' +
           (d.what === 'o:inv' ? '\nСтарые ссылки перестанут работать.' : d.what === 'o:off' ? '\nДоступ пропадёт сразу, прошлые записи останутся.' : '');
+      }
+      if (st.flow === 'catalog') {
+        if (d.what) return (d.what === 'hidden' ? 'Скрыть из продажи: ' : d.status === 'review' ? 'Подтвердить позицию: ' : 'Вернуть в продажу: ') + '<b>' + esc(d.name) + '</b>';
+        return esc(d.name) + ': ' + (d.field === 'price' ? 'цена продажи <b>' + money(d.value) + '</b>' : 'минимальный остаток <b>' + d.value + ' шт</b>');
+      }
+      if (st.flow === 'settings') {
+        var label = { change_fund: 'Размен', reminder_time: 'Время напоминания', expense_items: 'Статьи расходов' }[d.field];
+        return label + ': <b>' + esc(String(d.value)) + '</b>';
       }
       if (st.flow === 'expenses') return 'Расход месяца: ' + esc(d.item) + ' за ' + d.month + ' — <b>' + money(d.amount) + '</b>\nНе из кассы, вычитается из прибыли месяца.';
       if (st.flow === 'preorders') {

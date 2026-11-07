@@ -265,3 +265,40 @@ test('владелица: остатки, должники и сводка за 
   o.say('Отчёт за период'); o.press('o:pd:7');
   assert.match(o.last().text, /^<b>Сводка 02\.11\.2026 — 08\.11\.2026<\/b>/);
 });
+
+test('каталог владелицы: позиция «на проверке» сверху → подтвердить; цена, минимум, скрыть и вернуть', () => {
+  const { store, anna } = shop();
+  Posting.post(store, anna, { op_id: 'new-item-0001', kind: 'new_item', payload: { category: 'toys', name: 'Зайка', sale_price: 3000, confirm_new: true } });
+  const o = chat(store, ownerCtx);
+  o.say('Каталог');
+  assert.match(o.last().text, /на проверке: 1/);
+  assert.match(o.last().rows[0][0].text, /^⚠️ Зайка/);
+  const zid = o.buttons()[0].slice(5);
+  o.press('o:ci:' + zid); o.press('o:ca:active'); o.press('f:ok');
+  assert.equal(view(store).item(zid).status, 'active');
+  o.say('Каталог'); o.press('o:ci:bear'); o.press('o:ca:price'); o.say('5000'); o.press('f:ok');
+  o.say('Каталог'); o.press('o:ci:bear'); o.press('o:ca:min'); o.say('0'); o.press('f:ok');
+  assert.deepEqual([view(store).item('bear').sale_price, view(store).item('bear').min_stock], [5000, 0]);
+  o.say('Каталог'); o.press('o:ci:bear'); o.press('o:ca:hidden');
+  assert.match(o.last().text, /Скрыть из продажи: <b>Мишка<\/b>/);
+  o.press('f:ok');
+  assert.throws(() => Posting.post(store, anna, { op_id: 'sale-hidden-01', kind: 'sale', payload: { items: [{ item_id: 'bear', qty: 1 }], price: 5000, payments: [{ method: 'cash', amount: 5000 }] } }), { code: 'UNKNOWN_ITEM' });
+  o.say('Каталог'); o.press('o:ci:bear'); o.press('o:ca:active'); o.press('f:ok');
+  assert.equal(view(store).item('bear').status, 'active');
+});
+
+test('настройки владелицы: размен, время напоминания, статьи расходов; неверный ввод — переспросить', () => {
+  const { store } = shop();
+  const o = chat(store, ownerCtx);
+  o.say('Настройки');
+  assert.match(o.last().text, /Размен \(всегда в кассе\): 5 000 ₸/);
+  o.press('o:se:change_fund'); o.say('7 000'); o.press('f:ok');
+  o.say('Настройки'); o.press('o:se:reminder_time'); o.say('25:00');
+  assert.match(o.last().text, /ЧЧ:ММ/);
+  o.say('21:30'); o.press('f:ok');
+  o.say('Настройки'); o.press('o:se:expense_items'); o.say('Аренда, Коммуналка, Налоги'); o.press('f:ok');
+  const s = view(store).settings();
+  assert.deepEqual([s.change_fund, s.reminder_time, s.expense_items], [7000, '21:30', 'Аренда;Коммуналка;Налоги']);
+  o.say('Расходы месяца');
+  assert.deepEqual(o.buttons().slice(0, 3), ['o:ei:0', 'o:ei:1', 'o:ei:2']);
+});
