@@ -15,6 +15,9 @@ var ChatFlows = (function () {
   var C = typeof Calc !== 'undefined' ? Calc : require('../core/calc.js');
   var O = typeof Ops !== 'undefined' ? Ops : require('../core/ops.js');
   var P = typeof Posting !== 'undefined' ? Posting : require('../core/posting.js');
+  var S = typeof Summary !== 'undefined' ? Summary : require('../core/summary.js');
+  // Отчёты берутся в момент вызова: в Apps Script файл reports.js загружается позже этого.
+  function R() { return typeof Reports !== 'undefined' ? Reports : require('./reports.js'); }
 
   var MENU = {
     'Расход': 'expense',
@@ -26,9 +29,12 @@ var ChatFlows = (function () {
     'Сотрудники': 'staff',
     'Расходы месяца': 'expenses',
     'Предзаказы': 'preorders',
-    'Отчёт за смену': 'report'
+    'Отчёт за смену': 'report',
+    'Отчёт за период': 'period',
+    'Остатки': 'stock',
+    'Должники': 'debtors'
   };
-  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true };
+  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true, period: true, stock: true, debtors: true };
   var CANCEL_ROW = [{ text: 'Отмена', callback_data: 'f:x' }];
 
   function money(n) {
@@ -275,6 +281,15 @@ var ChatFlows = (function () {
           return [{ text: r.pickup_date.slice(8, 10) + '.' + r.pickup_date.slice(5, 7) + ' · ' + (c ? c.name : '') + ' · ' + money(r.total), callback_data: 'o:p:' + r.receipt_id }];
         }).concat([CANCEL_ROW]));
       }
+      if (st.flow === 'stock') return deps.send(R().stockText(S.stock(view), view.ctx.now));
+      if (st.flow === 'debtors') return deps.send(R().debtorsText(S.debtors(view)));
+      if (st.flow === 'period') {
+        st.step = 'range';
+        deps.state.set(st);
+        return deps.send('Сводка за какой период?', [
+          [{ text: 'Последние 7 дней', callback_data: 'o:pd:7' }],
+          [{ text: 'Этот месяц', callback_data: 'o:pd:cur' }, { text: 'Прошлый месяц', callback_data: 'o:pd:prev' }], CANCEL_ROW]);
+      }
       if (st.flow === 'report') {
         var shifts = view.rows('shifts').filter(function (s) { return s.status === 'closed'; })
           .sort(function (a, b) { return a.closed_at < b.closed_at ? 1 : -1; });
@@ -367,6 +382,13 @@ var ChatFlows = (function () {
         st.step = 'reason'; deps.state.set(st);
         return deps.send('Причина отмены?', [CANCEL_ROW]);
       }
+      if (st.flow === 'period' && data.indexOf('o:pd:') === 0) {
+        deps.state.clear();
+        var range = Owner.range(view.ctx.now.slice(0, 10), data.slice(5));
+        var names = { staff: {} };
+        view.rows('staff').forEach(function (x) { names.staff[x.staff_id] = x.name; });
+        return deps.send(R().periodText(S.period(view, range[0], range[1]), names));
+      }
       if (st.flow === 'report' && data.indexOf('o:r:') === 0) {
         deps.state.clear();
         return deps.send(deps.reportText(data.slice(4)));
@@ -431,6 +453,14 @@ var ChatFlows = (function () {
       st.step = 'stock'; deps.state.set(st);
       return deps.send('Букет уже собран. Вернуть цветы на склад?', [
         [{ text: 'Да, вернуть на склад', callback_data: 'o:rs:1' }, { text: 'Нет', callback_data: 'o:rs:0' }], CANCEL_ROW]);
+    },
+    /** Период: '7' — последние 7 дней включая сегодня; 'cur' — с 1-го числа по сегодня; 'prev' — весь прошлый месяц. */
+    range: function (today, kind) {
+      if (kind === '7') return [new Date(Date.parse(today + 'T00:00:00Z') - 6 * 86400000).toISOString().slice(0, 10), today];
+      if (kind === 'cur') return [today.slice(0, 8) + '01', today];
+      var pm = Owner.prevMonth(today.slice(0, 7));
+      var last = new Date(Date.parse(today.slice(0, 8) + '01T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+      return [pm + '-01', last];
     },
     prevMonth: function (m) {
       var y = Number(m.slice(0, 4));

@@ -610,3 +610,61 @@ test('исправление в открытой смене не делаетс�
   const r = w.post('s_anna', 'sale', SALE);
   assert.throws(() => w.post('s_owner', 'correction', { receipt_id: r.result.receipt_id, reason: 'x' }), { code: 'SHIFT_OPEN' });
 });
+
+// ---------- сводка за период, остатки, должники ----------
+
+test('сводка за период по двум сменам (вчера + №214): цифры, посчитанные вручную', () => {
+  const Summary = require('../apps-script/core/summary.js');
+  const Reports = require('../apps-script/bot/reports.js');
+  const w = world();
+  const { yesterdayReceipt } = startAndYesterday(w);
+  goldenShift(w, yesterdayReceipt);
+  const v = w.view();
+  const dates = v.rows('shifts').map((s) => s.shift_date).sort();
+  const s = Summary.period(v, dates[0], dates[dates.length - 1]);
+  assert.equal(s.shifts, 2);
+  assert.equal(s.revenue, 30000 + 69900);
+  assert.equal(s.receipts, 6);
+  assert.equal(s.avg_check, 16650);
+  assert.equal(s.cash, 30000 + 23000 + 3000 - 2000);
+  assert.equal(s.card, 27400);
+  assert.deepEqual(s.by_supplier, { 'Флора-опт': 32500 });
+  assert.equal(s.payroll, 5900 + 12098);
+  assert.deepEqual(s.payroll_by.map((p) => [p.staff_id, p.shifts, p.rate, p.pct]), [['s_anna', 2, 10000, 900 + 1049], ['s_mira', 1, 5000, 1049]]);
+  // Прибыль = 99 900 − 2 000 возврат − 32 500 закупки − 17 998 ЗП − 2 500 доставка − 4 000 прочее.
+  assert.equal(s.profit, 40902);
+  assert.deepEqual(s.losses, { defects: 1950, replaces: 0, shortage: 650, cash_diff: -2 });
+  assert.deepEqual(s.discounts_by, { s_anna: 600 });
+  assert.equal(s.withdrawal, 9100 + 10000);
+  assert.equal(s.stock_value_end, 74 * 650 + 12 * 300 + 60 * 100 + 40 * 450 + 4 * 2500);
+  assert.deepEqual(s.not_received, { debts: 4500, debts_old: 0, preorders: 15000 });
+
+  // Расходы владелицы за месяц периода уменьшают прибыль, касса не меняется.
+  w.post('s_owner', 'owner_expense', { month: dates[0].slice(0, 7), item: 'Аренда', amount: 40000 });
+  assert.equal(Summary.period(w.view(), dates[0], dates[1] || dates[0]).profit, 902);
+
+  const t = Reports.periodText(Summary.period(w.view(), dates[0], dates[0]), { staff: { s_anna: 'Анна', s_mira: 'Мира' } }).replace(/ /g, ' ');
+  for (const line of ['Выручка <b>99 900 ₸</b> (смен 2, чеков 6, средний чек 16 650 ₸)', 'Закупки 32 500 ₸ (Флора-опт 32 500 ₸)',
+    'Анна: смен 2, ставка 10 000 ₸, % 1 949 ₸', 'Аренда 40 000 ₸', '<b>ПРИБЫЛЬ 902 ₸</b>', 'предзаказы к доплате 15 000 ₸']) {
+    assert.ok(t.includes(line), 'нет строки: ' + line + '\n' + t);
+  }
+  assert.throws(() => Summary.period(v, '2026-11-10', '2026-11-01'), { code: 'BAD_INPUT' });
+});
+
+test('остатки и должники для владелицы', () => {
+  const Summary = require('../apps-script/core/summary.js');
+  const Reports = require('../apps-script/bot/reports.js');
+  const w = world();
+  const { yesterdayReceipt } = startAndYesterday(w);
+  goldenShift(w, yesterdayReceipt);
+  const v = w.view();
+  const st = Summary.stock(v);
+  assert.deepEqual(st.below.map((i) => [i.name, i.qty, i.min]), [['Эвкалипт', 12, 20]]);
+  const t = Reports.stockText(st, '2026-11-06T22:00:00+05:00').replace(/ /g, ' ');
+  assert.ok(t.includes('НИЖЕ МИНИМУМА:</b>\n  Эвкалипт — 12 / 20'));
+  assert.ok(t.includes('<b>ЦВЕТЫ:</b>\n  Роза красная 60 см — 74\n  Хризантема кустовая — 40'));
+  const d = Summary.debtors(v);
+  assert.deepEqual(d.map((x) => [x.name, x.note, x.debt]), [['Айгуль', 'соседний магазин', 4500]]);
+  assert.ok(Reports.debtorsText(d).replace(/ /g, ' ').includes('Итого долгов: 4 500 ₸'));
+  assert.equal(Reports.debtorsText([]), 'Должников нет.');
+});

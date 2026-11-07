@@ -71,7 +71,64 @@ var Reports = (function () {
     return L.join('\n');
   }
 
-  return { shiftText: shiftText, money: money };
+  var CATS = { flowers: 'ЦВЕТЫ', greens: 'ЗЕЛЕНЬ', toys: 'ИГРУШКИ', baskets: 'КОРЗИНЫ', packaging: 'УПАКОВКА' };
+
+  /** Сводка за период — шаблон ТЗ. names.staff — имена флористов. */
+  function periodText(s, names) {
+    var person = function (id) { return esc((names.staff || {})[id] || id); };
+    var L = [];
+    L.push('<b>Сводка ' + dateRu(s.from) + ' — ' + dateRu(s.to) + '</b>' + (s.corrected_shifts ? ' · исправленных смен: ' + s.corrected_shifts : ''));
+    L.push('');
+    L.push('Выручка <b>' + money(s.revenue) + '</b> (смен ' + s.shifts + ', чеков ' + s.receipts + ', средний чек ' + money(s.avg_check) + ')');
+    L.push('Деньги получены: нал ' + money(s.cash) + ' · безнал ' + money(s.card));
+    var sup = Object.keys(s.by_supplier).map(function (k) { return esc(k) + ' ' + money(s.by_supplier[k]); }).join(', ');
+    L.push('Закупки ' + money(s.purchases) + (sup ? ' (' + sup + ')' : ''));
+    L.push('ЗП ' + money(s.payroll));
+    s.payroll_by.forEach(function (p) {
+      L.push('  ' + person(p.staff_id) + ': смен ' + p.shifts + ', ставка ' + money(p.rate) + ', % ' + money(p.pct));
+    });
+    var exp = [['Доставки', s.delivery], ['Прочее', s.other], ['Возвраты', s.refunds]]
+      .map(function (x) { return x[0] + ' ' + money(x[1]); });
+    Object.keys(s.owner_by_item).forEach(function (k) { exp.push(esc(k) + ' ' + money(s.owner_by_item[k])); });
+    L.push(exp.join(' · '));
+    L.push('<b>ПРИБЫЛЬ ' + money(s.profit) + '</b>');
+    L.push('Потери: брак ' + money(s.losses.defects) + ' · замены ' + money(s.losses.replaces) +
+      ' · недостачи товара ' + money(s.losses.shortage) + ' · расхождения кассы ' + money(s.losses.cash_diff));
+    var disc = Object.keys(s.discounts_by).map(function (k) { return person(k) + ' ' + money(s.discounts_by[k]); }).join(', ');
+    L.push('Скидки ' + money(s.discounts) + (disc ? ' (' + disc + ')' : ''));
+    L.push('Изъято владелицей ' + money(s.withdrawal));
+    L.push('Стоимость остатка на складе: на начало ' + money(s.stock_value_start) + ' · на конец ' + money(s.stock_value_end));
+    L.push('Не получено: долги ' + money(s.not_received.debts) + ' (старше 30 дней ' + money(s.not_received.debts_old) +
+      ') · предзаказы к доплате ' + money(s.not_received.preorders));
+    return L.join('\n');
+  }
+
+  function stockText(st, nowIso) {
+    var L = ['<b>Остатки на ' + dateRu(String(nowIso).slice(0, 10)) + ', ' + String(nowIso).slice(11, 16) + '</b>'];
+    if (st.below.length) {
+      L.push('', '<b>НИЖЕ МИНИМУМА:</b>');
+      st.below.forEach(function (i) { L.push('  ' + esc(i.name) + ' — ' + i.qty + ' / ' + i.min); });
+    }
+    Object.keys(CATS).forEach(function (cat) {
+      var list = st.items.filter(function (i) { return i.category === cat; });
+      if (!list.length) return;
+      L.push('', '<b>' + CATS[cat] + ':</b>');
+      list.forEach(function (i) { L.push('  ' + esc(i.name) + ' — ' + i.qty); });
+    });
+    return L.join('\n');
+  }
+
+  function debtorsText(list) {
+    if (!list.length) return 'Должников нет.';
+    var L = ['<b>Должники</b>'];
+    list.forEach(function (d) {
+      L.push(esc(d.name) + (d.note ? ' · ' + esc(d.note) : '') + ' · долг ' + money(d.debt) + (d.since ? ' · с ' + dateRu(d.since) : ''));
+    });
+    L.push('', '<b>Итого долгов: ' + money(list.reduce(function (a, d) { return a + d.debt; }, 0)) + '</b>');
+    return L.join('\n');
+  }
+
+  return { shiftText: shiftText, periodText: periodText, stockText: stockText, debtorsText: debtorsText, money: money };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Reports;

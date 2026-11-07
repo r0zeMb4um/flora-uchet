@@ -248,3 +248,20 @@ test('отчёт за смену по кнопке; флорист не може
   a.say('Сотрудники');
   assert.match(a.last().text, /меню владелицы/);
 });
+
+test('владелица: остатки, должники и сводка за период в чате', () => {
+  const { store } = shop();
+  const o = chat(store, ownerCtx);
+  o.say('Остатки');
+  assert.match(o.last().text, /ИГРУШКИ:<\/b>\n  Мишка — 5/);
+  o.say('Должники');
+  assert.match(o.last().text, /Ерлан · сосед · долг 3 000 ₸ · с 01\.10\.2026/);
+  o.say('Отчёт за период');
+  assert.deepEqual(o.buttons(), ['o:pd:7', 'o:pd:cur', 'o:pd:prev', 'f:x']);
+  o.press('o:pd:cur');
+  assert.match(o.last().text, /^<b>Сводка 01\.11\.2026 — 08\.11\.2026<\/b>/);
+  o.say('Отчёт за период'); o.press('o:pd:prev');
+  assert.match(o.last().text, /^<b>Сводка 01\.10\.2026 — 31\.10\.2026<\/b>/);
+  o.say('Отчёт за период'); o.press('o:pd:7');
+  assert.match(o.last().text, /^<b>Сводка 02\.11\.2026 — 08\.11\.2026<\/b>/);
+});
