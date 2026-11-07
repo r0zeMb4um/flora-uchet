@@ -9,7 +9,7 @@
 - [x] Git установлен, папка проекта — git-хранилище.
 - [x] Имя и почта для git (только для этой папки) и первый коммит.
 - [x] Google-аккаунт проекта: flora.uchet.kz@gmail.com.
-- [ ] Apps Script API включён: https://script.google.com/home/usersettings → «Google Apps Script API» → Вкл.
+- [x] Apps Script API включён: https://script.google.com/home/usersettings → «Google Apps Script API» → Вкл.
 - [ ] clasp установлен (`npm install -g @google/clasp`) и `clasp login` выполнен.
 - [x] Бот создан в @BotFather (@flora_uchet_bot) (`/newbot`). Токен не вставлять в чат и файлы — только в Script Properties.
 - [ ] GitHub-аккаунт и пустой репозиторий проекта.
