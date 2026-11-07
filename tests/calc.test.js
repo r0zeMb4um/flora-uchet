@@ -373,3 +373,27 @@ test('большие суммы считаются без потери точн�
   assert.equal(Calc.floristPct(50000000, 300, 2), 750000);
   assert.throws(() => Calc.roundDiv(Number.MAX_SAFE_INTEGER, 1), { code: 'NOT_INTEGER' });
 });
+
+// ---------- Найдено при проверке качества ядра ----------
+
+test('зарплата: пустая смена, три флориста и дубль флориста — отказ', () => {
+  assert.throws(() => Calc.payroll(1000, []), { code: 'BAD_FLORISTS_COUNT' });
+  const f = { staff_id: 'a', shift_rate: 5000, pct_bp: 300 };
+  assert.throws(() => Calc.payroll(1000, [f, { ...f, staff_id: 'b' }, { ...f, staff_id: 'c' }]), { code: 'BAD_FLORISTS_COUNT' });
+  assert.throws(() => Calc.payroll(1000, [f, f]), { code: 'DUPLICATE_STAFF' });
+});
+
+test('процент флориста больше 100% — отказ', () => {
+  assert.equal(Calc.floristPct(1000, 10000, 1), 1000);
+  assert.throws(() => Calc.floristPct(1000, 10001, 1), { code: 'PCT_TOO_BIG' });
+});
+
+test('неизвестный способ оплаты не теряется молча, а даёт отказ', () => {
+  const bad = [{ kind: 'sale', method: 'kaspi', amount: 5000 }];
+  assert.throws(() => Calc.cashCalc(0, bad, []), { code: 'BAD_PAYMENT_METHOD' });
+  assert.throws(() => Calc.cardTotal(bad), { code: 'BAD_PAYMENT_METHOD' });
+});
+
+test('стоимость потерь не выходит за пределы точности', () => {
+  assert.throws(() => Calc.lossCost(9e15, 10), { code: 'NOT_INTEGER' });
+});

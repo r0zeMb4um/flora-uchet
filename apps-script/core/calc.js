@@ -141,6 +141,7 @@ var Calc = (function () {
   function floristPct(revenue, pctBp, floristsCount) {
     assertNonNegative(revenue, 'выручка');
     assertNonNegative(pctBp, 'процент');
+    if (pctBp > 10000) throw calcError('PCT_TOO_BIG', 'Процент флориста не может быть больше 100%');
     if (floristsCount !== 1 && floristsCount !== 2) {
       throw calcError('BAD_FLORISTS_COUNT', 'В смене может быть 1 или 2 флориста, получено: ' + floristsCount);
     }
@@ -153,10 +154,14 @@ var Calc = (function () {
    */
   function payroll(revenue, shiftStaff) {
     var n = shiftStaff.length;
+    if (n !== 1 && n !== 2) {
+      throw calcError('BAD_FLORISTS_COUNT', 'В смене может быть 1 или 2 флориста, получено: ' + n);
+    }
     var each = {};
     var total = 0;
     for (var i = 0; i < n; i++) {
       var s = shiftStaff[i];
+      if (each[s.staff_id]) throw calcError('DUPLICATE_STAFF', 'Флорист указан в смене дважды: ' + s.staff_id);
       var rate = assertNonNegative(s.shift_rate, 'ставка');
       var pct = floristPct(revenue, s.pct_bp, n);
       each[s.staff_id] = { rate: rate, pct: pct, total: rate + pct };
@@ -173,11 +178,16 @@ var Calc = (function () {
   // Выдаются после пересчёта и в расчёт не входят.
   var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, pay_adjust: true, withdrawal_close: true };
 
+  var PAYMENT_METHODS = { cash: true, card: true };
+
   function splitPayments(payments, method) {
     var inSum = 0;
     var refundSum = 0;
     for (var i = 0; i < payments.length; i++) {
       var p = payments[i];
+      if (!PAYMENT_METHODS[p.method]) {
+        throw calcError('BAD_PAYMENT_METHOD', 'Неизвестный способ оплаты: ' + p.method + ' (только cash или card)');
+      }
       if (p.method !== method) continue;
       assertPositive(p.amount, 'платёж');
       if (p.kind === 'refund') refundSum += p.amount;
@@ -279,7 +289,7 @@ var Calc = (function () {
   /** Стоимость брака, замен, недостач = количество × последняя закупочная цена (всегда ≥ 0). */
   function lossCost(qty, lastCost) {
     assertInt(qty, 'количество');
-    return Math.abs(qty) * assertNonNegative(lastCost, 'закупочная цена');
+    return assertInt(Math.abs(qty) * assertNonNegative(lastCost, 'закупочная цена'), 'стоимость');
   }
 
   /** Корректировки инвентаризации = факт − расчёт (только ненулевые). */
