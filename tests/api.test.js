@@ -122,3 +122,34 @@ test('формулы в Mini App — тот же файл, что на серв�
   const b = fs.readFileSync(require.resolve('../miniapp/js/calc.js'), 'utf8');
   assert.equal(b, a, 'скопируйте apps-script/core/calc.js в miniapp/js/calc.js (это делает npm run deploy)');
 });
+
+test('закрытие через кассу: инвентаризация → пересчёт вслепую → предпросмотр → закрытие', () => {
+  const { store, now } = shop();
+  const post = (kind, payload, op) => MiniApi.dispatch(store, 777, { action: 'post', kind, op_id: op, payload }, now);
+  post('sale', { items: [{ item_id: 'rose', qty: 5 }], price: 6000, payments: [{ method: 'cash', amount: 6000 }] }, 'op-sale-000001');
+  post('cash_out', { type: 'delivery', amount: 500 }, 'op-cash-000001');
+
+  // До инвентаризации закрыть нельзя, предпросмотр тоже.
+  assert.throws(() => MiniApi.dispatch(store, 777, { action: 'close_preview', counted: 20500 }, now), { code: 'INVENTORY_REQUIRED' });
+  const st = MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data;
+  assert.equal(st.shift.inventory_done, false);
+  assert.deepEqual(st.shift.expenses, { delivery: 500, other: 0, withdrawal: 0, pay_adjust: 0 });
+  post('inventory', { facts: { rose: 35 } }, 'op-inv-0000001');
+  assert.equal(MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.shift.inventory_done, true);
+
+  // Пересчёт: 20 450 при расчёте 15 000 + 6 000 − 500 = 20 500 → недостача 50.
+  const pv = MiniApi.dispatch(store, 777, { action: 'close_preview', counted: 20450 }, now).data;
+  assert.equal(pv.cash_diff, -50);
+  assert.deepEqual(pv.payroll, [{ name: 'Анна', due: 5180, paid: 5180, unpaid: 0 }]);
+  assert.equal(pv.can_take_above_change_fund, 20450 - 5180 - 5000);
+  assert.equal(pv.max_withdrawal, 20450 - 5180);
+  assert.equal(store.tables.shifts[0].status, 'open', 'предпросмотр ничего не пишет');
+  assert.ok(!('calc_cash' in pv), 'расчётная сумма напрямую не отдаётся');
+
+  const done = post('close_shift', { counted: 20450, close_withdrawal: 10000, expenses_confirmed: true }, 'op-close-00001');
+  assert.equal(done.data.result.next_cash, 20450 - 5180 - 10000);
+  assert.equal(done.data.state.shift, null);
+  assert.deepEqual(done.notify.map((n) => n.kind), ['shift_report']);
+  // Повтор нажатия «Закрыть» — уже проведено, второй раз не закрывается.
+  assert.equal(post('close_shift', { counted: 20450, close_withdrawal: 10000, expenses_confirmed: true }, 'op-close-00001').data.status, 'already');
+});

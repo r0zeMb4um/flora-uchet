@@ -56,6 +56,7 @@ var Webhook = (function () {
     var data = cb ? String(cb.data || '') : '';
 
     try {
+      if (text === '/id') return Tg.send(chatId, 'Ваш Telegram ID: <code>' + tgId + '</code>');
       if (text.indexOf('/start') === 0) {
         var token = text.split(/\s+/)[1];
         if (token) return showConsent_(store, chatId, token);
@@ -161,10 +162,29 @@ var Webhook = (function () {
 
   function notify(store, clientId, list) {
     (list || []).forEach(function (n) {
-      var text = Notify.text(n);
+      var text = n.kind === 'shift_report' ? shiftReportText_(store, clientId, n.shift_id) : Notify.text(n);
       if (!text) return;
-      if (n.to === 'owner') ownersOf_(store, clientId).forEach(function (o) { Tg.send(o.telegram_id, text); });
+      if (n.to === 'owner') {
+        ownersOf_(store, clientId).forEach(function (o) { Tg.send(o.telegram_id, text); });
+        // Администратор видит финансы клиента, пока доступ не выключен (решение D16).
+        var admin = PropertiesService.getScriptProperties().getProperty('ADMIN_TELEGRAM_ID');
+        var client = store.find('clients', 'client_id', clientId)[0];
+        if (admin && n.kind === 'shift_report' && client && client.admin_finance_access === true) {
+          Tg.send(admin, '📋 ' + Tg.esc(client.name) + '\n' + text);
+        }
+      }
     });
+  }
+
+  /** Отчёт смены текстом (данные — Ops.shiftReport). */
+  function shiftReportText_(store, clientId, shiftId) {
+    var shift = store.rows('shifts').filter(function (s) { return s.shift_id === shiftId && s.client_id === clientId; })[0];
+    if (!shift) return '';
+    var view = Ops.makeView(store, { client_id: clientId, point_id: shift.point_id, staff_id: 'system', role: 'owner', now: nowIso() });
+    var names = { items: {}, staff: {} };
+    view.rows('catalog').forEach(function (c) { names.items[c.item_id] = c.name; });
+    view.rows('staff').forEach(function (s) { names.staff[s.staff_id] = s.name; });
+    return Reports.shiftText(Ops.shiftReport(view, shiftId), names);
   }
 
   function reportError_(store, update, err) {

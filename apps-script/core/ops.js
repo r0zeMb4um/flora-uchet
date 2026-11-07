@@ -653,8 +653,9 @@ var Ops = (function () {
     });
     plan.notify.push({ to: 'owner', kind: 'shift_report', shift_id: shift.shift_id });
     plan.result = {
-      shift_id: shift.shift_id, cash_diff: close.cash_diff, next_cash: close.next_cash,
-      payroll_paid: close.payroll_paid_each, payroll_unpaid: close.payroll_unpaid_each
+      shift_id: shift.shift_id, shift_no: shift.shift_no, cash_diff: close.cash_diff, next_cash: close.next_cash,
+      payroll_due: due, payroll_paid: close.payroll_paid_each, payroll_unpaid: close.payroll_unpaid_each,
+      can_take_above_change_fund: close.can_take_above_change_fund, max_withdrawal: p.counted - close.payroll_paid_total
     };
   };
 

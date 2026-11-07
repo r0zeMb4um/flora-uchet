@@ -9,7 +9,7 @@ var MiniApi = (function () {
   'use strict';
 
   // Операции, которые Mini App может проводить сейчас (расширяется на этапе D).
-  var FLORIST_KINDS = { sale: true, bouquet: true };
+  var FLORIST_KINDS = { sale: true, bouquet: true, inventory: true, cash_out: true, withdrawal: true, close_shift: true };
 
   function apiError(code, message) {
     var e = new Error(message);
@@ -43,7 +43,9 @@ var MiniApi = (function () {
         on_shift: !!mine,
         revenue: rep.revenue,
         receipts_count: rep.receipts_count,
-        my_pay: mine ? { rate: mine.rate, pct: mine.pct, total: mine.total } : null
+        my_pay: mine ? { rate: mine.rate, pct: mine.pct, total: mine.total } : null,
+        inventory_done: view.rows('ops_log').some(function (o) { return o.kind === 'inventory' && o.shift_id === shift.shift_id; }),
+        expenses: { delivery: rep.delivery, other: rep.other, withdrawal: rep.withdrawal, pay_adjust: rep.pay_adjust }
       };
     }
     var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; }).map(function (c) {
@@ -59,6 +61,24 @@ var MiniApi = (function () {
   function dispatch(store, telegramId, body, now) {
     var staff = staffOf(store, telegramId);
     if (body.action === 'bootstrap') return { data: bootstrap(store, staff, now), notify: [] };
+    if (body.action === 'close_preview') {
+      // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
+      if (staff.role !== 'florist') throw apiError('FORBIDDEN', 'Смену закрывает флорист');
+      var view = Ops.makeView(store, ctxOf(staff, now));
+      var plan = Ops.build(view, 'close_shift', 'preview-' + staff.staff_id, {
+        counted: body.counted, close_withdrawal: body.close_withdrawal || 0, expenses_confirmed: true
+      });
+      var names = {};
+      view.rows('staff').forEach(function (s) { names[s.staff_id] = s.name; });
+      var r = plan.result;
+      return { data: {
+        cash_diff: r.cash_diff, next_cash: r.next_cash, can_take_above_change_fund: r.can_take_above_change_fund,
+        max_withdrawal: r.max_withdrawal,
+        payroll: Object.keys(r.payroll_due).map(function (id) {
+          return { name: names[id] || id, due: r.payroll_due[id], paid: r.payroll_paid[id], unpaid: r.payroll_unpaid[id] };
+        })
+      }, notify: [] };
+    }
     if (body.action === 'post') {
       if (staff.role !== 'florist' || !FLORIST_KINDS[body.kind]) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
       var res = Posting.post(store, ctxOf(staff, now), { op_id: body.op_id, kind: body.kind, payload: body.payload || {} });

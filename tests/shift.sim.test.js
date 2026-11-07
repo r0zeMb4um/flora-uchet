@@ -484,3 +484,39 @@ test('чек в долг, который уже частично погасил�
   assert.throws(() => w.post('s_anna', 'cancel', { receipt_id: d.result.receipt_id, reason: 'вернул' }), { code: 'DEBT_REPAID' });
   assert.equal(w.view().debtOf(w.customerId('Бек')), 3500);
 });
+
+// ---------- текст отчёта смены владелице (шаблон ТЗ) ----------
+
+test('отчёт смены №214 текстом: все цифры эталона на месте, нулевые строки скрыты', () => {
+  const Reports = require('../apps-script/bot/reports.js');
+  const w = world();
+  const { yesterdayReceipt } = startAndYesterday(w);
+  const shiftId = goldenShift(w, yesterdayReceipt);
+  const v = w.view();
+  const names = { items: {}, staff: {} };
+  v.rows('catalog').forEach((c) => { names.items[c.item_id] = c.name; });
+  v.rows('staff').forEach((s) => { names.staff[s.staff_id] = s.name; });
+  const t = Reports.shiftText(Ops.shiftReport(v, shiftId), names).replace(/ /g, ' ');
+  for (const line of [
+    'ВЫРУЧКА: 69 900 ₸</b> (чеков: 5)',
+    'нал 23 000 ₸ · безнал 27 400 ₸ · в долг 4 500 ₸ · предзаказы к доплате 15 000 ₸',
+    'скидки 600 ₸',
+    'ПОСТУПИЛО ПО ПРОШЛЫМ ДОЛГАМ И ЗАКАЗАМ: нал 3 000 ₸',
+    'ВОЗВРАТЫ: нал 2 000 ₸',
+    'на начало 15 000 ₸ → расчёт 32 500 ₸ → пересчёт 32 498 ₸',
+    'РАСХОЖДЕНИЕ: −2 ₸ (недостача)',
+    'остаток на следующую смену (после ЗП и изъятия): 10 400 ₸',
+    'БЕЗНАЛ ДЛЯ СВЕРКИ С KASPI: 27 400 ₸',
+    'Анна: ставка 5 000 ₸ + % 1 049 ₸ = 6 049 ₸',
+    'Мира: ставка 5 000 ₸ + % 1 049 ₸ = 6 049 ₸',
+    'РАСХОДЫ: доставка 2 500 ₸ · прочее 4 000 ₸',
+    'ИЗЪЯТИЕ: 10 000 ₸',
+    'приход: Роза красная 60 см +50 (32 500 ₸)',
+    'брак: Роза красная 60 см −3 (1 950 ₸ по закупке)',
+    'инвентаризация: Роза красная 60 см −1 (650 ₸)',
+    'ниже минимума: Эвкалипт — 12 / 20'
+  ]) assert.ok(t.includes(line), 'нет строки: ' + line + '\n---\n' + t);
+  assert.ok(!t.includes('отменено'), 'нулевые строки не показываются');
+  assert.ok(!t.includes('— <b>к доплате'), 'ЗП выдана полностью');
+  assert.ok(!/аренд/i.test(t), 'аренды в смене нет (D11)');
+});

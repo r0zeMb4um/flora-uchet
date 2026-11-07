@@ -156,6 +156,7 @@
   function render() {
     if (!state.data) return;
     if (state.screen === 'sale') return renderSale();
+    if (state.screen === 'close') return renderClose();
     renderMain();
   }
 
@@ -190,7 +191,8 @@
           el('span', { class: 'big', text: 'Продажа / букет' }),
           el('span', { text: 'Позиции, цена, скидка, оплата' })
         ]));
-        nodes.push(el('div', { class: 'muted center', text: 'Предзаказы, приход, брак, возвраты и закрытие смены — на следующем этапе.' }));
+        nodes.push(el('button', { class: 'btn', onclick: function () { openClose(); } }, ['Закрыть смену']));
+        nodes.push(el('div', { class: 'muted center', text: 'Предзаказы, приход, брак и возвраты — на следующем шаге.' }));
       } else {
         nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
       }
@@ -296,6 +298,199 @@
     if (!tg) nodes.push(el('button', { class: 'btn btn--primary fallback-main', id: 'fallback', onclick: submit }, ['Провести']));
     app.replaceChildren.apply(app, nodes);
     updateTotals();
+  }
+
+  // ---------- закрытие смены (ТЗ: инвентаризация → расходы → пересчёт вслепую → расхождение → ЗП → изъятие) ----------
+
+  var CLOSE_KEY = 'flora.close.v1';
+
+  function openClose() {
+    var saved = store(CLOSE_KEY);
+    var s = state.data.shift;
+    if (saved && saved.shift_no === s.shift_no) state.close = saved;
+    else state.close = { shift_no: s.shift_no, step: 'inv', op_id: uuid(), counted: '', withdrawal: '', preview: null, facts: null };
+    if (state.close.step === 'inv' && s.inventory_done) state.close.step = 'exp';
+    state.screen = 'close';
+    render();
+  }
+  function saveClose() { store(CLOSE_KEY, state.close); }
+  function goStep(step) { state.close.step = step; saveClose(); render(); window.scrollTo(0, 0); }
+
+  function busy(promise) {
+    state.sending = true;
+    if (tg) tg.MainButton.showProgress(false);
+    render();
+    return promise.catch(function (e) {
+      haptic('error');
+      toast(e.code ? e.message : 'Нет связи. Ничего не потеряно — нажмите ещё раз.', true);
+      throw e;
+    }).then(function (v) { return v; }, function () { return null; }).then(function (v) {
+      state.sending = false;
+      if (tg) tg.MainButton.hideProgress();
+      render();
+      return v;
+    });
+  }
+  function postOp(kind, payload, opId) {
+    return api({ action: 'post', kind: kind, op_id: opId || uuid(), payload: payload });
+  }
+  function stepTitle(n, text) {
+    return el('div', {}, [el('div', { class: 'muted', text: 'Закрытие смены · шаг ' + n + ' из 4' }), el('h1', { class: 'h1', text: text })]);
+  }
+
+  function renderClose() {
+    backButton(true);
+    var c = state.close;
+    if (c.step === 'inv') return closeInventory(c);
+    if (c.step === 'exp') return closeExpenses(c);
+    if (c.step === 'count') return closeCount(c);
+    if (c.step === 'result') return closeResult(c);
+    return closeDone(c);
+  }
+
+  // Шаг 1. Инвентаризация: расчёт по каждой позиции, флорист вводит факт или жмёт «Всё верно».
+  function closeInventory(c) {
+    var items = state.data.catalog;
+    if (!c.facts) { c.facts = {}; items.forEach(function (i) { c.facts[i.item_id] = String(i.stock); }); }
+    var changed = function () { return items.some(function (i) { return intOf(c.facts[i.item_id]) !== i.stock; }); };
+    var rows = items.map(function (i) {
+      return el('div', { class: 'sum' }, [
+        el('div', {}, [el('div', { text: i.name }), el('div', { class: 'muted num', text: 'по расчёту ' + i.stock })]),
+        el('input', { class: 'input num', style: 'max-width:110px', inputmode: 'numeric', value: c.facts[i.item_id],
+          'aria-label': 'Факт: ' + i.name,
+          oninput: function (e) { c.facts[i.item_id] = e.target.value; saveClose(); updateMain(); } })
+      ]);
+    });
+    function updateMain() {
+      var bad = items.some(function (i) { return intOf(c.facts[i.item_id]) === null; });
+      mainButton(state.sending ? 'Проводим…' : (changed() ? 'Провести инвентаризацию' : 'Всё верно'), !bad && !state.sending, submit);
+    }
+    function submit() {
+      var facts = {};
+      items.forEach(function (i) { facts[i.item_id] = intOf(c.facts[i.item_id]); });
+      busy(postOp('inventory', { facts: facts })).then(function (res) {
+        if (!res) return;
+        state.data = res.state;
+        var adj = res.result.adjustments || [];
+        toast(adj.length ? 'Расхождений: ' + adj.length + ' — записаны' : 'Остатки сошлись');
+        goStep('exp');
+      });
+    }
+    app.replaceChildren(stepTitle(1, 'Инвентаризация'),
+      el('div', { class: 'muted', text: 'Пересчитайте товар. Если сходится — «Всё верно», если нет — впишите факт.' }),
+      el('div', { class: 'card' }, rows));
+    updateMain();
+  }
+
+  // Шаг 2. Все ли расходы и изъятия внесены.
+  function closeExpenses(c) {
+    var e = state.data.shift.expenses;
+    var form = c.exp || (c.exp = { type: 'delivery', amount: '', comment: '' });
+    var list = el('div', { class: 'card' }, [
+      el('div', { class: 'sum' }, [el('span', { text: 'Доставка' }), el('span', { class: 'num', text: money(e.delivery) })]),
+      el('div', { class: 'sum' }, [el('span', { text: 'Прочие расходы' }), el('span', { class: 'num', text: money(e.other) })]),
+      el('div', { class: 'sum' }, [el('span', { text: 'Владелица забрала' }), el('span', { class: 'num', text: money(e.withdrawal) })])
+    ]);
+    var chips = el('div', { class: 'chips' }, [['delivery', 'Доставка'], ['other', 'Прочее'], ['withdrawal', 'Владелица забрала']].map(function (t) {
+      return el('button', { class: 'chip', 'aria-pressed': String(form.type === t[0]), onclick: function () { form.type = t[0]; saveClose(); render(); } }, [t[1]]);
+    }));
+    var amount = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Сумма', value: form.amount, oninput: function (ev) { form.amount = ev.target.value; saveClose(); } });
+    var comment = form.type === 'withdrawal' ? null : el('input', { class: 'search', placeholder: 'Комментарий (необязательно)', value: form.comment, oninput: function (ev) { form.comment = ev.target.value; saveClose(); } });
+    var add = el('button', { class: 'btn', disabled: state.sending, onclick: function () {
+      var sum = intOf(form.amount);
+      if (!sum) return toast('Введите сумму', true);
+      var op = form.type === 'withdrawal' ? postOp('withdrawal', { amount: sum }) : postOp('cash_out', { type: form.type, amount: sum, comment: form.comment });
+      busy(op).then(function (res) {
+        if (!res) return;
+        state.data = res.state;
+        c.exp = null; saveClose();
+        toast('Добавлено: ' + money(sum));
+        render();
+      });
+    } }, ['Добавить']);
+    app.replaceChildren(stepTitle(2, 'Расходы и изъятия'),
+      el('div', { class: 'muted', text: 'Проверьте: все доставки, прочие расходы и деньги, которые забрала владелица, внесены?' }),
+      list, el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Добавить, если что-то забыли' }), chips, amount, comment, add]));
+    mainButton(state.sending ? 'Проводим…' : 'Да, всё внесено', !state.sending, function () { goStep('count'); });
+  }
+
+  // Шаг 3. Пересчёт вслепую: расчётная сумма не показывается.
+  function closeCount(c) {
+    var input = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Например, 32 498', value: c.counted, 'aria-label': 'Наличные в кассе',
+      oninput: function (e) { c.counted = e.target.value; saveClose(); upd(); } });
+    function upd() { mainButton(state.sending ? 'Считаем…' : 'Дальше', intOf(c.counted) !== null && !state.sending, next); }
+    function next() {
+      busy(api({ action: 'close_preview', counted: intOf(c.counted), close_withdrawal: 0 })).then(function (pv) {
+        if (!pv) return;
+        c.preview = pv; c.counted_sent = intOf(c.counted); goStep('result');
+      });
+    }
+    app.replaceChildren(stepTitle(3, 'Пересчёт наличных'),
+      el('div', { class: 'card card--note' }, [el('div', { text: 'Пересчитайте все наличные в кассе, включая размен, и впишите сумму. Сколько должно быть — бот покажет после.' })]),
+      el('div', { class: 'field' }, [el('label', { text: 'Наличные в кассе' }), input]));
+    upd();
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  // Шаг 4. Расхождение, зарплата, изъятие и закрытие.
+  function closeResult(c) {
+    var pv = c.preview;
+    var counted = c.counted_sent;
+    var paid = pv.payroll.reduce(function (s, p) { return s + p.paid; }, 0);
+    var diffText = pv.cash_diff === 0 ? 'Касса сошлась' : (pv.cash_diff > 0 ? 'Излишек ' : 'Недостача ') + money(Math.abs(pv.cash_diff));
+    var pay = pv.payroll.map(function (p) {
+      return el('div', {}, [
+        el('div', { class: 'sum' }, [el('span', { text: p.name }), el('span', { class: 'big num copper', text: money(p.paid) })]),
+        p.unpaid ? el('div', { class: 'error', text: 'Не хватило наличных — к доплате ' + money(p.unpaid) + ' (владелица увидит в отчёте)' }) : null
+      ]);
+    });
+    var hint = el('div', {});
+    var wInput = el('input', { class: 'input num', inputmode: 'numeric', placeholder: '0', value: c.withdrawal,
+      oninput: function (e) { c.withdrawal = e.target.value; saveClose(); upd(); } });
+    function withdrawal() { return c.withdrawal === '' ? 0 : intOf(c.withdrawal); }
+    function upd() {
+      var w = withdrawal();
+      var bad = w === null || w > pv.max_withdrawal;
+      hint.replaceChildren(bad
+        ? el('div', { class: 'error', text: w === null ? 'Сумма цифрами' : 'Больше, чем есть в кассе после зарплаты (' + money(pv.max_withdrawal) + ')' })
+        : el('div', { class: 'sum' }, [el('span', { text: 'Останется на следующую смену' }), el('span', { class: 'num', text: money(counted - paid - w) })]));
+      mainButton(state.sending ? 'Закрываем…' : 'Закрыть смену', !bad && !state.sending, submitClose);
+    }
+    function submitClose() {
+      var w = withdrawal();
+      busy(postOp('close_shift', { counted: counted, close_withdrawal: w || 0, expenses_confirmed: true }, c.op_id)).then(function (res) {
+        if (!res) return;
+        haptic('success');
+        c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no };
+        state.data = res.state;
+        goStep('done');
+      });
+    }
+    app.replaceChildren(stepTitle(4, 'Итог смены'),
+      el('div', { class: 'card ' + (pv.cash_diff === 0 ? '' : 'card--note') }, [
+        el('div', { class: 'big', text: diffText, style: 'color:' + (pv.cash_diff < 0 ? 'var(--danger)' : 'var(--ok)') }),
+        el('div', { class: 'muted num', text: 'Пересчитано: ' + money(counted) })
+      ]),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Возьмите из кассы зарплату:' })].concat(pay)),
+      el('div', { class: 'card' }, [
+        el('div', { class: 'muted', text: 'Владелица забирает сейчас (если нет — оставьте пустым)' }),
+        wInput,
+        el('div', { class: 'muted num', text: 'Можно забрать, чтобы остался размен: ' + money(pv.can_take_above_change_fund) }),
+        hint
+      ]));
+    upd();
+  }
+
+  function closeDone(c) {
+    store(CLOSE_KEY, null);
+    backButton(false);
+    app.replaceChildren(
+      el('div', { class: 'card card--accent' }, [
+        el('div', { class: 'big', text: 'Смена №' + c.done.shift_no + ' закрыта' }),
+        el('div', { class: 'muted num', text: 'Оставлено в кассе на следующую смену: ' + money(c.done.next_cash) })
+      ]),
+      el('div', { class: 'muted center', text: 'Отчёт отправлен владелице.' }));
+    mainButton('Готово', true, function () { state.close = null; state.screen = 'main'; render(); });
   }
 
   // ---------- проведение ----------
