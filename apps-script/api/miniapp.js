@@ -8,8 +8,12 @@
 var MiniApi = (function () {
   'use strict';
 
-  // Операции, которые Mini App может проводить сейчас (расширяется на этапе D).
-  var FLORIST_KINDS = { sale: true, bouquet: true, inventory: true, cash_out: true, withdrawal: true, close_shift: true };
+  // Операции флориста в кассе (ТЗ, «Кнопки флориста»: всё, где больше одной позиции, — в Mini App).
+  var FLORIST_KINDS = {
+    sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
+    preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
+    inventory: true, cash_out: true, withdrawal: true, close_shift: true
+  };
 
   function apiError(code, message) {
     var e = new Error(message);
@@ -54,13 +58,51 @@ var MiniApi = (function () {
         stock: view.stock(c.item_id), min: c.min_stock, review: c.status === 'review'
       };
     }).sort(function (a, b) { return a.name < b.name ? -1 : 1; });
-    return { me: { name: staff.name, role: staff.role }, shift: shiftInfo, catalog: catalog };
+    var names = {};
+    var customers = view.rows('customers').filter(function (c) { return c.anonymized !== true; }).map(function (c) {
+      names[c.customer_id] = c.name;
+      return { customer_id: c.customer_id, name: c.name, note: c.note, debt: view.debtOf(c.customer_id) };
+    }).sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+    var pays = view.rows('payments');
+    var debts = view.rows('debt_moves');
+    var preorders = view.rows('receipts').filter(function (r) {
+      return r.type === 'preorder' && r.status === 'posted' && (r.assembly_status === 'waiting' || r.assembly_status === 'assembled');
+    }).map(function (r) {
+      var paid = pays.filter(function (p) { return p.receipt_id === r.receipt_id; })
+        .reduce(function (a, p) { return a + (p.kind === 'refund' ? -p.amount : p.amount); }, 0);
+      var debt = debts.filter(function (m) { return m.receipt_id === r.receipt_id; }).reduce(function (a, m) { return a + m.amount; }, 0);
+      return { receipt_id: r.receipt_id, customer: names[r.customer_id] || '', pickup_date: r.pickup_date,
+        total: r.total, paid: paid, unpaid: r.total - paid - debt, assembly_status: r.assembly_status };
+    }).sort(function (a, b) { return a.pickup_date < b.pickup_date ? -1 : 1; });
+    var reservations = view.rows('reservations').filter(function (r) { return r.status === 'active'; }).map(function (r) {
+      return { reservation_id: r.reservation_id, customer: names[r.customer_id] || '', pickup_date: r.pickup_date, total: r.total };
+    }).sort(function (a, b) { return a.pickup_date < b.pickup_date ? -1 : 1; });
+    return { me: { name: staff.name, role: staff.role }, shift: shiftInfo, catalog: catalog,
+      customers: customers, preorders: preorders, reservations: reservations };
+  }
+
+  /** Чеки последних дней для возврата: сколько оплачено и сколько ещё можно вернуть. */
+  function recentReceipts(store, staff, now, days) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var since = new Date(Date.parse(now) - (days || 7) * 86400000).toISOString().slice(0, 10);
+    var pays = view.rows('payments');
+    return view.rows('receipts').filter(function (r) { return r.status === 'posted' && String(r.created_at).slice(0, 10) >= since; })
+      .map(function (r) {
+        var paid = 0;
+        var refunded = 0;
+        pays.forEach(function (p) { if (p.receipt_id === r.receipt_id) { if (p.kind === 'refund') refunded += p.amount; else paid += p.amount; } });
+        return { receipt_id: r.receipt_id, receipt_no: r.receipt_no, type: r.type, total: r.total, created_at: r.created_at,
+          refundable: Math.max(0, paid - refunded) };
+      })
+      .sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1; })
+      .slice(0, 100);
   }
 
   /** Обработка запроса после проверки подписи. Чистая относительно Google: store передаётся снаружи. */
   function dispatch(store, telegramId, body, now) {
     var staff = staffOf(store, telegramId);
     if (body.action === 'bootstrap') return { data: bootstrap(store, staff, now), notify: [] };
+    if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
     if (body.action === 'close_preview') {
       // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
       if (staff.role !== 'florist') throw apiError('FORBIDDEN', 'Смену закрывает флорист');

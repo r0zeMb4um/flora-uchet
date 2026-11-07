@@ -520,3 +520,37 @@ test('отчёт смены №214 текстом: все цифры этало�
   assert.ok(!t.includes('— <b>к доплате'), 'ЗП выдана полностью');
   assert.ok(!/аренд/i.test(t), 'аренды в смене нет (D11)');
 });
+
+// ---------- часть 3–4 этапа D ----------
+
+test('стоимость брака фиксируется при списании: новый приход по другой цене отчёт не меняет (D25)', () => {
+  const w = world();
+  openGolden(w);
+  w.post('s_anna', 'defect', { lines: [{ item_id: 'rose_red_60', qty: 2, reason: 'broken' }] });
+  w.post('s_anna', 'income', { lines: [{ item_id: 'rose_red_60', qty: 10, cost_sum: 9000 }], supplier: 'Опт' });
+  assert.equal(w.view().item('rose_red_60').last_cost, 900);
+  const r = Ops.shiftReport(w.view(), w.view().openShift().shift_id);
+  assert.deepEqual(r.defects, [{ item_id: 'rose_red_60', qty: -2, reason: 'broken', cost: 1300 }]);
+});
+
+test('отмена предзаказа владелицей: аванс вернуть или оставить, букет на склад, выдать уже нельзя (D24)', () => {
+  const w = world();
+  openGolden(w);
+  const pre = w.post('s_anna', 'preorder', { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-08', price: 20000, payments: [{ method: 'cash', amount: 5000 }] });
+  const id = pre.result.receipt_id;
+  w.post('s_anna', 'preorder_assemble', { receipt_id: id, items: [{ item_id: 'chrysanthemum', qty: 10 }] });
+  assert.throws(() => w.post('s_anna', 'preorder_cancel', { receipt_id: id, reason: 'x' }), { code: 'FORBIDDEN' });
+  assert.throws(() => w.post('s_owner', 'preorder_cancel', { receipt_id: id, reason: 'клиент отказался', refund: { method: 'cash', amount: 5001 } }), { code: 'REFUND_TOO_BIG' });
+  w.post('s_owner', 'preorder_cancel', { receipt_id: id, reason: 'клиент отказался', refund: { method: 'cash', amount: 5000 }, return_stock: true });
+  const v = w.view();
+  assert.equal(v.stock('chrysanthemum'), 49);
+  const rep = Ops.shiftReport(v, v.openShift().shift_id);
+  assert.equal(rep.revenue, 20000, 'выручка дня оформления не меняется');
+  assert.equal(rep.calc_cash, 15000, 'аванс 5 000 вернули из кассы');
+  assert.throws(() => w.post('s_anna', 'preorder_pickup', { receipt_id: id, payments: [] }), { code: 'BAD_STATE' });
+  assert.throws(() => w.post('s_owner', 'preorder_cancel', { receipt_id: id, reason: 'ещё раз' }), { code: 'UNKNOWN_RECEIPT' });
+  // Аванс оставлен магазину, без шага возврата.
+  const p2 = w.post('s_anna', 'preorder', { customer: { customer_id: w.customerId('Дана') }, pickup_date: '2026-11-09', price: 3000, payments: [{ method: 'card', amount: 1000 }] });
+  w.post('s_owner', 'preorder_cancel', { receipt_id: p2.result.receipt_id, reason: 'не пришла' });
+  assert.equal(Ops.shiftReport(w.view(), w.view().openShift().shift_id).card_total, 1000);
+});

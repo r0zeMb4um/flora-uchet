@@ -153,3 +153,29 @@ test('закрытие через кассу: инвентаризация → �
   // Повтор нажатия «Закрыть» — уже проведено, второй раз не закрывается.
   assert.equal(post('close_shift', { counted: 20450, close_withdrawal: 10000, expenses_confirmed: true }, 'op-close-00001').data.status, 'already');
 });
+
+test('касса: долг, предзаказы, брони, приход с новой позицией, брак, возврат по недавнему чеку', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const post = (kind, payload) => MiniApi.dispatch(store, 777, { action: 'post', kind, op_id: 'op-part3-' + String(++n).padStart(4, '0'), payload }, now);
+  post('sale', { items: [{ item_id: 'rose', qty: 2 }], price: 2400, payments: [{ method: 'cash', amount: 400 }], debt_customer: { new_customer: { name: 'Айгуль', note: 'сосед' } } });
+  post('preorder', { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-09', price: 10000, payments: [{ method: 'card', amount: 3000 }] });
+  post('reserve', { customer: { new_customer: { name: 'Бек' } }, pickup_date: '2026-11-10', price: 5000 });
+  const st = MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data;
+  assert.deepEqual(st.customers.map((c) => [c.name, c.debt]), [['Айгуль', 2000], ['Бек', 0], ['Дана', 0]]);
+  assert.deepEqual(st.preorders.map((p) => [p.customer, p.total, p.paid, p.unpaid, p.assembly_status]), [['Дана', 10000, 3000, 7000, 'waiting']]);
+  assert.deepEqual(st.reservations.map((r) => [r.customer, r.total]), [['Бек', 5000]]);
+
+  assert.throws(() => post('new_item', { category: 'flowers', name: 'Роза белая', sale_price: 1300 }), { code: 'SIMILAR_ITEMS' });
+  const item = post('new_item', { category: 'flowers', name: 'Роза белая', sale_price: 1300, confirm_new: true }).data.result.item_id;
+  post('income', { lines: [{ item_id: item, qty: 20, cost_sum: 14000 }, { item_id: 'rose', qty: 10, cost_sum: 6500 }], supplier: 'Флора-опт' });
+  post('defect', { lines: [{ item_id: item, qty: 1, reason: 'broken' }] });
+  const after = MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.catalog;
+  assert.deepEqual(after.map((c) => [c.item_id === item ? 'new' : c.item_id, c.stock, c.review]), [['rose', 48, false], ['new', 19, true]]);
+
+  const recent = MiniApi.dispatch(store, 777, { action: 'receipts' }, now).data;
+  const debtSale = recent.find((r) => r.total === 2400);
+  assert.equal(debtSale.refundable, 400, 'вернуть можно только реально оплаченное');
+  post('refund', { receipt_id: debtSale.receipt_id, mode: 'money', method: 'cash', amount: 400 });
+  assert.equal(MiniApi.dispatch(store, 777, { action: 'receipts' }, now).data.find((r) => r.total === 2400).refundable, 0);
+});

@@ -213,7 +213,9 @@ var Ops = (function () {
     lines.forEach(function (l) {
       add(plan, view, 'stock_moves', {
         move_id: nextId(plan, 'mv'), shift_id: plan.shift_id, type: type, item_id: l.item_id,
-        qty: opts.sign * l.qty, cost_sum: l.cost_sum == null ? '' : l.cost_sum,
+        qty: opts.sign * l.qty,
+        // income — сумма по накладной; брак и замена — стоимость по закупке на момент списания (D25).
+        cost_sum: l.cost_sum != null ? l.cost_sum : (type === 'defect' || type === 'replace' ? C.lossCost(l.qty, view.item(l.item_id).last_cost) : ''),
         supplier_or_reason: l.reason || opts.reason || '', receipt_id: opts.receipt_id || ''
       });
       touchStock(plan, l.item_id);
@@ -417,6 +419,45 @@ var Ops = (function () {
     plan.result = { receipt_id: r.receipt_id, paid: paid, to_debt: toDebt };
   };
 
+  /**
+   * Отмена предзаказа клиентом — только владелица (ТЗ, решение D24).
+   * Выручка дня оформления не меняется (процент уже выплачен, отчёт смены неизменен — D23).
+   * Аванс: вернуть (наличными — из кассы открытой смены, безналом — в любой момент) или оставить магазину.
+   * Собранный букет можно вернуть на склад.
+   */
+  H.preorder_cancel = function (view, p, plan) {
+    requireOwner(view);
+    var r = view.receipt(p.receipt_id);
+    if (!r || r.type !== 'preorder' || r.status !== 'posted' || (r.assembly_status !== 'waiting' && r.assembly_status !== 'assembled')) {
+      throw opsError('UNKNOWN_RECEIPT', 'Активный предзаказ не найден');
+    }
+    var reason = text(p.reason, 'причина', 200);
+    if (p.refund) {
+      var amount = posInt(p.refund.amount, 'сумма возврата');
+      var method = oneOf(p.refund.method, ['cash', 'card'], 'способ возврата');
+      var money = receiptMoney(view, r.receipt_id);
+      C.checkRefund(money.paid, money.refunded, amount);
+      if (method === 'cash') {
+        var shift = view.openShift();
+        if (!shift) throw opsError('NO_OPEN_SHIFT', 'Вернуть наличными можно только из кассы открытой смены');
+        plan.shift_id = shift.shift_id;
+      }
+      addPayments(plan, view, [{ method: method, amount: amount }], 'refund', r.receipt_id);
+    }
+    if (p.return_stock === true && r.assembly_status === 'assembled') {
+      view.rows('stock_moves').forEach(function (m) {
+        if (m.receipt_id !== r.receipt_id || m.type !== 'sale') return;
+        add(plan, view, 'stock_moves', {
+          move_id: nextId(plan, 'mv'), shift_id: plan.shift_id, type: 'cancel', item_id: m.item_id,
+          qty: -m.qty, cost_sum: '', supplier_or_reason: reason, receipt_id: r.receipt_id
+        });
+        touchStock(plan, m.item_id);
+      });
+    }
+    update(plan, 'receipts', { receipt_id: r.receipt_id }, r, { assembly_status: 'cancelled' });
+    plan.result = { receipt_id: r.receipt_id, refunded: p.refund ? p.refund.amount : 0 };
+  };
+
   H.income = function (view, p, plan) {
     requireShift(view, plan);
     var lines = list(p.lines, 'строки прихода').map(function (l) {
@@ -594,7 +635,7 @@ var Ops = (function () {
     Object.keys(adj).forEach(function (id) {
       add(plan, view, 'stock_moves', {
         move_id: nextId(plan, 'mv'), shift_id: plan.shift_id, type: 'adjust', item_id: id, qty: adj[id],
-        cost_sum: '', supplier_or_reason: 'инвентаризация', receipt_id: ''
+        cost_sum: C.lossCost(adj[id], view.item(id).last_cost), supplier_or_reason: 'инвентаризация', receipt_id: ''
       });
       touchStock(plan, id);
       out.push({ item_id: id, qty: adj[id], cost: C.lossCost(adj[id], view.item(id).last_cost) });
@@ -708,6 +749,8 @@ var Ops = (function () {
       }, 0);
     var moves = view.rows('stock_moves').filter(function (m) { return m.shift_id === shiftId; });
     var item = function (id) { return view.item(id) || { name: id, last_cost: 0 }; };
+    // Стоимость потерь — записанная при списании; для старых строк без неё — по текущей закупочной.
+    var lossOf = function (m) { return typeof m.cost_sum === 'number' ? m.cost_sum : C.lossCost(m.qty, item(m.item_id).last_cost); };
     var staff = view.shiftStaff(shiftId);
     var pay = C.payroll(n.revenue.revenue, staff);
     var paidBy = function (sid) { return sumWhere(n.cash_ops, function (o) { return o.staff_id === sid && (o.type === 'rate' || o.type === 'pct'); }); };
@@ -742,9 +785,9 @@ var Ops = (function () {
       income: moves.filter(function (m) { return m.type === 'income'; })
         .map(function (m) { return { item_id: m.item_id, qty: m.qty, cost_sum: m.cost_sum }; }),
       defects: moves.filter(function (m) { return m.type === 'defect'; })
-        .map(function (m) { return { item_id: m.item_id, qty: m.qty, reason: m.supplier_or_reason, cost: C.lossCost(m.qty, item(m.item_id).last_cost) }; }),
+        .map(function (m) { return { item_id: m.item_id, qty: m.qty, reason: m.supplier_or_reason, cost: lossOf(m) }; }),
       adjustments: moves.filter(function (m) { return m.type === 'adjust'; })
-        .map(function (m) { return { item_id: m.item_id, qty: m.qty, cost: C.lossCost(m.qty, item(m.item_id).last_cost) }; }),
+        .map(function (m) { return { item_id: m.item_id, qty: m.qty, cost: lossOf(m) }; }),
       below_min: C.belowMin(balance, catalog).map(function (id) {
         return { item_id: id, qty: balance[id] || 0, min: item(id).min_stock };
       })
