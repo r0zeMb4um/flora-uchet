@@ -117,14 +117,22 @@
       out.total = Calc.receiptTotal(price, discount).total;
     } catch (e) { out.error = e.message; return out; }
     var payments;
+    var debtCustomer;
     if (d.pay === 'cash') payments = [{ method: 'cash', amount: out.total }];
     else if (d.pay === 'card') payments = [{ method: 'card', amount: out.total }];
-    else {
+    else if (d.pay === 'debt') {
+      debtCustomer = customerRef(d.cust || {});
+      if (!debtCustomer) { out.error = 'Выберите должника или впишите имя'; return out; }
+      var now = d.cashPart === '' || d.cashPart == null ? 0 : intOf(d.cashPart);
+      if (now === null || now >= out.total) { out.error = 'Оплачено сейчас — меньше итога'; return out; }
+      payments = now ? [{ method: 'cash', amount: now }] : [];
+    } else {
       var cash = intOf(d.cashPart);
       if (!cash || cash >= out.total) { out.error = 'Наличные — больше нуля и меньше итога'; return out; }
       payments = [{ method: 'cash', amount: cash }, { method: 'card', amount: out.total - cash }];
     }
     out.payload = { items: items, price: price, discount: discount, payments: payments };
+    if (debtCustomer) out.payload.debt_customer = debtCustomer;
     return out;
   }
 
@@ -162,6 +170,7 @@
     if (!state.data) return;
     if (state.screen === 'sale') return renderSale();
     if (state.screen === 'close') return renderClose();
+    if (SCREENS[state.screen]) return SCREENS[state.screen]();
     renderMain();
   }
 
@@ -196,8 +205,16 @@
           el('span', { class: 'big', text: 'Продажа / букет' }),
           el('span', { text: 'Позиции, цена, скидка, оплата' })
         ]));
-        nodes.push(el('button', { class: 'btn', onclick: function () { openClose(); } }, ['Закрыть смену']));
-        nodes.push(el('div', { class: 'muted center', text: 'Предзаказы, приход, брак и возвраты — на следующем шаге.' }));
+        var go = function (screen) { return function () { openScreen(screen); }; };
+        var pre = state.data.preorders.length + state.data.reservations.length;
+        nodes.push(el('div', { class: 'grid2' }, [
+          el('button', { class: 'btn', onclick: go('preorders') }, ['Предзаказы' + (pre ? ' (' + pre + ')' : '')]),
+          el('button', { class: 'btn', onclick: go('income') }, ['Приход']),
+          el('button', { class: 'btn', onclick: go('defect') }, ['Брак']),
+          el('button', { class: 'btn', onclick: go('refund') }, ['Возврат']),
+          el('button', { class: 'btn', onclick: go('stock') }, ['Остатки']),
+          el('button', { class: 'btn', onclick: function () { openClose(); } }, ['Закрыть смену'])
+        ]));
       } else {
         nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
       }
@@ -267,18 +284,19 @@
       }));
       var discInput = d.disc === 'none' ? null : el('input', { class: 'input num', inputmode: 'decimal', placeholder: d.disc === 'pct' ? '10' : '500', value: d.discVal,
         oninput: function (e) { d.discVal = e.target.value; saveDraft(); updateTotals(); } });
-      var payChips = el('div', { class: 'chips' }, [['cash', 'Нал'], ['card', 'Безнал'], ['mixed', 'Нал + безнал']].map(function (t) {
-        return el('button', { class: 'chip', 'aria-pressed': String(d.pay === t[0]), onclick: function () { d.pay = t[0]; saveDraft(); renderBottom(); } }, [t[1]]);
+      var payChips = el('div', { class: 'chips' }, [['cash', 'Нал'], ['card', 'Безнал'], ['mixed', 'Нал + безнал'], ['debt', 'В долг']].map(function (t) {
+        return el('button', { class: 'chip', 'aria-pressed': String(d.pay === t[0]), onclick: function () { d.pay = t[0]; d.cashPart = ''; saveDraft(); renderBottom(); } }, [t[1]]);
       }));
-      var cashInput = d.pay !== 'mixed' ? null : el('div', { class: 'field' }, [
-        el('label', { text: 'Наличными (остальное — безнал)' }),
+      var cashInput = d.pay !== 'mixed' && d.pay !== 'debt' ? null : el('div', { class: 'field' }, [
+        el('label', { text: d.pay === 'debt' ? 'Оплачено сейчас наличными (если часть — остальное в долг)' : 'Наличными (остальное — безнал)' }),
         el('input', { class: 'input num', inputmode: 'numeric', value: d.cashPart, oninput: function (e) { d.cashPart = e.target.value; saveDraft(); updateTotals(); } })
       ]);
+      var debtPicker = d.pay !== 'debt' ? null : customerPicker(d.cust || (d.cust = {}), function () { saveDraft(); updateTotals(); }, true);
       var totals = el('div', { id: 'totals' });
       bottom.replaceChildren(
         el('div', { class: 'sum' }, [el('span', { class: 'muted', text: 'По каталогу' }), el('span', { class: 'num', text: money(sm.sum) })]),
         el('div', { class: 'field' }, [el('label', { text: 'Цена (можно поставить свою)' }), priceInput]),
-        discChips, discInput, payChips, cashInput, totals
+        discChips, discInput, payChips, debtPicker, cashInput, totals
       );
       updateTotals();
     }
@@ -288,6 +306,10 @@
       var nodes = [];
       if (sm.total) nodes.push(el('div', { class: 'sum' }, [el('span', { text: 'Итого' }), el('span', { class: 'big num', text: money(sm.total) })]));
       if (d.pay === 'mixed' && sm.payload) nodes.push(el('div', { class: 'muted num', text: 'Безнал: ' + money(sm.payload.payments[1].amount) }));
+      if (d.pay === 'debt' && sm.payload) {
+        var paidNow = sm.payload.payments.reduce(function (a, p) { return a + p.amount; }, 0);
+        nodes.push(el('div', { class: 'muted num', text: 'В долг: ' + money(sm.total - paidNow) }));
+      }
       if (sm.error && sm.items.length) nodes.push(el('div', { class: 'error', text: sm.error }));
       if (t) t.replaceChildren.apply(t, nodes);
       var label = state.sending ? 'Проводим…' : (sm.payload ? 'Провести ' + money(sm.total) : 'Провести');
@@ -497,6 +519,396 @@
       el('div', { class: 'muted center', text: 'Отчёт отправлен владелице.' }));
     mainButton('Готово', true, function () { state.close = null; state.screen = 'main'; render(); });
   }
+
+  // ---------- общие элементы форм ----------
+
+  /** Покупатель: выбрать из списка или вписать нового. obj хранит выбор (живёт в черновике). */
+  function customerPicker(obj, onChange, debtorsFirst) {
+    var list = state.data.customers.slice();
+    if (debtorsFirst) list.sort(function (a, b) { return (b.debt > 0) - (a.debt > 0); });
+    var box = el('div', { class: 'field' });
+    function draw() {
+      var sel = el('select', { class: 'input', 'aria-label': 'Покупатель', onchange: null });
+      sel.appendChild(el('option', { value: '', text: '— Новый покупатель —' }));
+      list.forEach(function (c) {
+        var o = el('option', { value: c.customer_id, text: c.name + (c.note ? ' (' + c.note + ')' : '') + (c.debt ? ' — долг ' + money(c.debt) : '') });
+        if (obj.id === c.customer_id) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.onchange = function () { obj.id = sel.value; draw(); onChange(); };
+      var nodes = [el('label', { text: 'Покупатель' }), sel];
+      if (!obj.id) {
+        nodes.push(el('input', { class: 'search', placeholder: 'Имя (без фамилии и телефона)', value: obj.name || '',
+          oninput: function (e) { obj.name = e.target.value; onChange(); } }));
+        nodes.push(el('input', { class: 'search', placeholder: 'Пометка, например «соседний магазин»', value: obj.note || '',
+          oninput: function (e) { obj.note = e.target.value; onChange(); } }));
+        var cb = el('input', { type: 'checkbox', id: 'cnew' });
+        cb.checked = !!obj.confirm;
+        cb.onchange = function () { obj.confirm = cb.checked; onChange(); };
+        nodes.push(el('label', { class: 'muted', for: 'cnew' }, [cb, ' Это другой человек, хотя имя совпадает']));
+      }
+      box.replaceChildren.apply(box, nodes);
+    }
+    draw();
+    return box;
+  }
+  function customerRef(obj) {
+    if (obj.id) return { customer_id: obj.id };
+    if (obj.name && obj.name.trim()) return { new_customer: { name: obj.name.trim(), note: (obj.note || '').trim(), confirm_new: !!obj.confirm } };
+    return null;
+  }
+
+  /** Строки «позиция — количество (— сумма)». lines — массив в черновике экрана. */
+  function linesEditor(lines, opts, onChange) {
+    var box = el('div', { class: 'card' });
+    function draw() {
+      var rows = lines.map(function (l, i) {
+        var sel = el('select', { class: 'input', 'aria-label': 'Позиция' });
+        sel.appendChild(el('option', { value: '', text: '— выберите позицию —' }));
+        state.data.catalog.forEach(function (c) {
+          var o = el('option', { value: c.item_id, text: c.name + ' · остаток ' + c.stock });
+          if (l.item_id === c.item_id) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.onchange = function () { l.item_id = sel.value; onChange(); };
+        var qty = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'шт', value: l.qty || '', 'aria-label': 'Количество',
+          oninput: function (e) { l.qty = e.target.value; onChange(); } });
+        var parts = [qty];
+        if (opts.withCost) {
+          parts.push(el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'сумма ₸', value: l.cost || '', 'aria-label': 'Сумма по накладной',
+            oninput: function (e) { l.cost = e.target.value; onChange(); } }));
+        }
+        parts.push(el('button', { class: 'btn', 'aria-label': 'Убрать строку', onclick: function () { lines.splice(i, 1); draw(); onChange(); } }, ['✕']));
+        return el('div', { class: 'field' }, [sel, el('div', { class: 'row' }, parts)]);
+      });
+      rows.push(el('button', { class: 'btn', onclick: function () { lines.push({ item_id: '', qty: '' }); draw(); onChange(); } }, ['+ Строка']));
+      box.replaceChildren.apply(box, rows);
+    }
+    draw();
+    return box;
+  }
+  function cleanLines(lines, withCost) {
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (!l.item_id && !l.qty && !l.cost) continue;
+      var q = intOf(l.qty);
+      if (!l.item_id || !q) return { error: 'В каждой строке — позиция и количество' };
+      var line = { item_id: l.item_id, qty: q };
+      if (withCost) {
+        var c = intOf(l.cost);
+        if (c === null) return { error: 'В каждой строке — сумма по накладной' };
+        line.cost_sum = c;
+      }
+      out.push(line);
+    }
+    if (!out.length) return { error: 'Добавьте хотя бы одну строку' };
+    return { lines: out };
+  }
+  function title(text, sub) {
+    return el('div', {}, [el('h1', { class: 'h1', text: text }), sub ? el('div', { class: 'muted', text: sub }) : null]);
+  }
+  function chips(options, current, onPick) {
+    return el('div', { class: 'chips' }, options.map(function (t) {
+      return el('button', { class: 'chip', 'aria-pressed': String(current === t[0]), onclick: function () { onPick(t[0]); } }, [t[1]]);
+    }));
+  }
+  function openScreen(screen, data) {
+    state.form = Object.assign({ op_id: uuid() }, data || {});
+    state.screen = screen;
+    render();
+    window.scrollTo(0, 0);
+  }
+  /** Провести операцию с кнопки экрана; после успеха — обновлённые данные и возврат. */
+  function submitOp(kind, payload, okText, next) {
+    var f = state.form;
+    busy(postOp(kind, payload, f.op_id)).then(function (res) {
+      if (!res) return;
+      haptic('success');
+      state.data = res.state;
+      toast((res.status === 'already' ? 'Уже было проведено. ' : '') + okText);
+      if (next) next(res); else { state.screen = 'main'; render(); }
+    });
+  }
+
+  var SCREENS = {};
+
+  // ---------- приход ----------
+  SCREENS.income = function () {
+    backButton(true);
+    var f = state.form;
+    f.lines = f.lines || [{ item_id: '', qty: '', cost: '' }];
+    var totalEl = el('div', { class: 'sum' });
+    function upd() {
+      var c = cleanLines(f.lines, true);
+      var total = c.lines ? c.lines.reduce(function (a, l) { return a + l.cost_sum; }, 0) : 0;
+      totalEl.replaceChildren(el('span', { text: 'Итог накладной (сверьте с бумагой)' }), el('span', { class: 'big num', text: money(total) }));
+      var ok = c.lines && (f.supplier || '').trim();
+      mainButton(state.sending ? 'Проводим…' : 'Провести приход ' + money(total), !!ok && !state.sending, function () {
+        submitOp('income', { lines: c.lines, supplier: f.supplier.trim() }, 'Приход проведён');
+      });
+    }
+    var nf = f.newItem || (f.newItem = { open: false, category: 'flowers', name: '', price: '' });
+    var newBox = el('div', { class: 'card' });
+    function drawNew() {
+      if (!nf.open) {
+        newBox.replaceChildren(el('button', { class: 'btn', onclick: function () { nf.open = true; drawNew(); } }, ['+ Новая позиция в каталог']));
+        return;
+      }
+      newBox.replaceChildren(
+        el('div', { class: 'muted', text: 'Новая позиция сразу работает в продажах, владелица проверит её позже.' }),
+        chips(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; }), nf.category, function (k) { nf.category = k; drawNew(); }),
+        el('input', { class: 'search', placeholder: 'Название, например «Роза белая 60 см»', value: nf.name, oninput: function (e) { nf.name = e.target.value; } }),
+        el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Цена продажи ₸', value: nf.price, oninput: function (e) { nf.price = e.target.value; } }),
+        nf.similar ? el('div', { class: 'error', text: 'Похожие уже есть: ' + nf.similar.join(', ') + '. Если это другая позиция — нажмите «Создать» ещё раз.' }) : null,
+        el('button', { class: 'btn btn--primary', disabled: state.sending, onclick: function () {
+          var price = intOf(nf.price);
+          if (!nf.name.trim() || !price) return toast('Название и цена продажи', true);
+          busy(postOp('new_item', { category: nf.category, name: nf.name.trim(), sale_price: price, confirm_new: !!nf.similar }, uuid())
+            .catch(function (e) {
+              if (e.code === 'SIMILAR_ITEMS') { nf.similar = (e.details || []).map(function (x) { return x.name; }); }
+              throw e;
+            })).then(function (res) {
+            if (!res) { render(); return; }
+            state.data = res.state;
+            f.lines.push({ item_id: res.result.item_id, qty: '', cost: '' });
+            f.newItem = { open: false, category: 'flowers', name: '', price: '' };
+            toast('Позиция добавлена — впишите количество и сумму');
+            render();
+          });
+        } }, ['Создать'])
+      );
+    }
+    drawNew();
+    app.replaceChildren(title('Приход', 'Строки накладной: позиция, количество, сумма за строку. Касса не меняется — поставщику платит владелица.'),
+      linesEditor(f.lines, { withCost: true }, upd), newBox,
+      el('div', { class: 'field' }, [el('label', { text: 'Поставщик' }),
+        el('input', { class: 'search', value: f.supplier || '', placeholder: 'Например, Флора-опт', oninput: function (e) { f.supplier = e.target.value; upd(); } })]),
+      el('div', { class: 'card' }, [totalEl]));
+    upd();
+  };
+
+  // ---------- брак ----------
+  SCREENS.defect = function () {
+    backButton(true);
+    var f = state.form;
+    f.lines = f.lines || [{ item_id: '', qty: '' }];
+    f.reason = f.reason || 'wilted';
+    function upd() {
+      var c = cleanLines(f.lines, false);
+      mainButton(state.sending ? 'Проводим…' : 'Списать', !!c.lines && !state.sending, function () {
+        submitOp('defect', { lines: c.lines.map(function (l) { return { item_id: l.item_id, qty: l.qty, reason: f.reason }; }) }, 'Списано');
+      });
+    }
+    app.replaceChildren(title('Брак', 'Что списать и почему'),
+      chips([['arrived_bad', 'Пришло бракованным'], ['wilted', 'Завяло'], ['broken', 'Сломано'], ['gift', 'Подарок'], ['other', 'Другое']], f.reason,
+        function (k) { f.reason = k; render(); }),
+      linesEditor(f.lines, {}, upd));
+    upd();
+  };
+
+  // ---------- возврат ----------
+  SCREENS.refund = function () {
+    backButton(true);
+    var f = state.form;
+    if (!f.receipts) {
+      app.replaceChildren(title('Возврат', 'Загружаем чеки за 7 дней…'));
+      mainButton(null);
+      api({ action: 'receipts', days: 7 }).then(function (list) { f.receipts = list; render(); })
+        .catch(function (e) { toast(e.message || 'Нет связи', true); });
+      return;
+    }
+    if (!f.receipt) {
+      var q = (f.q || '').replace(/\D/g, '');
+      var list = f.receipts.filter(function (r) { return !q || String(r.total).indexOf(q) >= 0; });
+      var search = el('input', { class: 'search', inputmode: 'numeric', placeholder: 'Сумма чека', value: f.q || '',
+        oninput: function (e) { f.q = e.target.value; render(); var s = app.querySelector('.search'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } } });
+      mainButton(null);
+      app.replaceChildren.apply(app, [title('Возврат', 'Найдите чек по сумме'), search].concat(list.length ? list.map(function (r) {
+        return el('button', { class: 'btn', style: 'text-align:left', onclick: function () { f.receipt = r; f.mode = 'money'; f.method = 'cash'; render(); } }, [
+          el('div', { class: 'sum' }, [el('span', { text: '№' + r.receipt_no + ' · ' + String(r.created_at).slice(8, 10) + '.' + String(r.created_at).slice(5, 7) + ' ' + String(r.created_at).slice(11, 16) }),
+            el('span', { class: 'num', text: money(r.total) })]),
+          el('div', { class: 'muted num', text: (r.type === 'bouquet' ? 'букет · ' : r.type === 'preorder' ? 'предзаказ · ' : '') + 'можно вернуть деньгами до ' + money(r.refundable) })
+        ]);
+      }) : [el('div', { class: 'muted', text: 'Чеков не найдено' })]));
+      return;
+    }
+    var r = f.receipt;
+    f.lines = f.lines || [{ item_id: '', qty: '' }];
+    var body = el('div', {});
+    function upd() {
+      if (f.mode === 'money') {
+        var a = intOf(f.amount);
+        var ok = a && a <= r.refundable;
+        mainButton(state.sending ? 'Проводим…' : 'Вернуть ' + (a ? money(a) : ''), !!ok && !state.sending, function () {
+          submitOp('refund', { receipt_id: r.receipt_id, mode: 'money', method: f.method, amount: a }, 'Возврат проведён');
+        });
+      } else {
+        var c = cleanLines(f.lines, false);
+        mainButton(state.sending ? 'Проводим…' : 'Выдать замену', !!c.lines && !state.sending, function () {
+          submitOp('refund', { receipt_id: r.receipt_id, mode: 'replace', items: c.lines }, 'Замена проведена');
+        });
+      }
+    }
+    if (f.mode === 'money') {
+      body.replaceChildren(
+        el('div', { class: 'field' }, [el('label', { text: 'Сумма возврата (не больше ' + money(r.refundable) + ')' }),
+          el('input', { class: 'input num', inputmode: 'numeric', value: f.amount || '', oninput: function (e) { f.amount = e.target.value; upd(); } })]),
+        chips([['cash', 'Наличными'], ['card', 'На карту']], f.method, function (k) { f.method = k; render(); }));
+    } else {
+      body.replaceChildren(el('div', { class: 'muted', text: 'Состав нового букета со склада. Вернувшиеся цветы на склад не приходуются.' }),
+        linesEditor(f.lines, {}, upd));
+    }
+    app.replaceChildren(title('Возврат по чеку №' + r.receipt_no, money(r.total)),
+      chips([['money', 'Вернуть деньги'], ['replace', 'Заменить букет']], f.mode, function (k) { f.mode = k; render(); }), body,
+      el('button', { class: 'btn', onclick: function () { f.receipt = null; render(); } }, ['Другой чек']));
+    upd();
+  };
+
+  // ---------- остатки ----------
+  SCREENS.stock = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    var q = (f.q || '').trim().toLowerCase();
+    var cat = f.cat || 'all';
+    var list = state.data.catalog.filter(function (c) {
+      return (cat === 'all' || c.category === cat) && (!q || c.name.toLowerCase().indexOf(q) >= 0);
+    }).sort(function (a, b) { return ((b.stock < b.min) - (a.stock < a.min)) || (a.name < b.name ? -1 : 1); });
+    app.replaceChildren(title('Остатки'),
+      el('input', { class: 'search', type: 'search', placeholder: 'Поиск', value: f.q || '', oninput: function (e) { f.q = e.target.value; SCREENS.stock(); var s = app.querySelector('.search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }),
+      chips([['all', 'Все']].concat(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; })), cat, function (k) { f.cat = k; render(); }),
+      el('div', { class: 'card' }, list.map(function (c) {
+        var low = c.stock < c.min;
+        return el('div', { class: 'sum' }, [
+          el('span', { text: c.name + (c.review ? ' · на проверке' : '') }),
+          el('span', { class: 'num' + (low ? ' copper' : ''), text: c.stock + (low ? ' / мин. ' + c.min : '') })
+        ]);
+      })));
+  };
+
+  // ---------- предзаказы и брони ----------
+  function dateRu(d) { var p = String(d).split('-'); return p.length === 3 ? p[2] + '.' + p[1] : d; }
+  SCREENS.preorders = function () {
+    backButton(true);
+    mainButton('Новый предзаказ', !state.sending, function () { openScreen('preorder_new'); });
+    var d = state.data;
+    var nodes = [title('Предзаказы', 'По дате выдачи')];
+    if (!d.preorders.length && !d.reservations.length) nodes.push(el('div', { class: 'muted', text: 'Активных предзаказов и броней нет.' }));
+    d.preorders.forEach(function (p) {
+      nodes.push(el('div', { class: 'card' }, [
+        el('div', { class: 'sum' }, [el('b', { text: dateRu(p.pickup_date) + ' · ' + p.customer }), el('span', { class: 'num', text: money(p.total) })]),
+        el('div', { class: 'muted num', text: 'аванс ' + money(p.paid) + ' · к доплате ' + money(p.unpaid) + ' · ' + (p.assembly_status === 'assembled' ? 'собран' : 'не собран') }),
+        p.assembly_status === 'waiting'
+          ? el('button', { class: 'btn', onclick: function () { openScreen('assemble', { pre: p }); } }, ['Собрать'])
+          : el('button', { class: 'btn btn--primary', onclick: function () { openScreen('pickup', { pre: p, method: 'cash' }); } }, ['Выдать'])
+      ]));
+    });
+    d.reservations.forEach(function (r) {
+      nodes.push(el('div', { class: 'card card--note' }, [
+        el('div', { class: 'sum' }, [el('b', { text: dateRu(r.pickup_date) + ' · ' + r.customer + ' · бронь' }), el('span', { class: 'num', text: money(r.total) })]),
+        el('div', { class: 'muted', text: 'Без аванса — в выручку войдёт, когда внесут первую оплату.' }),
+        el('div', { class: 'row' }, [
+          el('button', { class: 'btn btn--primary', onclick: function () { openScreen('preorder_new', { fromRes: r, method: 'cash' }); } }, ['Принять аванс']),
+          el('button', { class: 'btn', onclick: function () {
+            state.form = { op_id: uuid() };
+            submitOp('reserve_cancel', { reservation_id: r.reservation_id }, 'Бронь отменена', function () { state.screen = 'preorders'; render(); });
+          } }, ['Отменить бронь'])
+        ])
+      ]));
+    });
+    app.replaceChildren.apply(app, nodes);
+  };
+
+  SCREENS.preorder_new = function () {
+    backButton(true);
+    var f = state.form;
+    f.method = f.method || 'cash';
+    f.cust = f.cust || {};
+    var res = f.fromRes;
+    var hint = el('div', {});
+    function upd() {
+      var total = res ? res.total : intOf(f.price);
+      var adv = f.advance === '' || f.advance == null ? 0 : intOf(f.advance);
+      var cust = res ? true : customerRef(f.cust);
+      var err = !cust ? 'Укажите клиента' : !res && !/^\d{4}-\d{2}-\d{2}$/.test(f.date || '') ? 'Укажите дату выдачи' : !total ? 'Укажите сумму заказа'
+        : adv === null || adv > total ? 'Аванс — не больше суммы заказа' : (res && !adv) ? 'Впишите аванс' : '';
+      hint.replaceChildren(err ? el('div', { class: 'error', text: err })
+        : el('div', { class: 'muted num', text: adv ? 'Предзаказ: войдёт в выручку сегодня на ' + money(total) + ', к доплате ' + money(total - adv) : 'Без аванса — это бронь: в выручку не входит' }));
+      var label = adv ? 'Провести, аванс ' + money(adv) : 'Записать бронь';
+      mainButton(state.sending ? 'Проводим…' : label, !err && !state.sending, function () {
+        if (res) return submitOp('preorder', { reservation_id: res.reservation_id, payments: [{ method: f.method, amount: adv }] }, 'Аванс принят', backToList);
+        if (adv) {
+          return submitOp('preorder', { customer: customerRef(f.cust), pickup_date: f.date, price: total, discount: { kind: 'none' },
+            payments: [{ method: f.method, amount: adv }] }, 'Предзаказ оформлен', backToList);
+        }
+        submitOp('reserve', { customer: customerRef(f.cust), pickup_date: f.date, price: total, discount: { kind: 'none' } }, 'Бронь записана', backToList);
+      });
+    }
+    function backToList() { state.screen = 'preorders'; render(); }
+    var nodes = [title(res ? 'Аванс по брони' : 'Новый предзаказ', res ? res.customer + ' · ' + dateRu(res.pickup_date) + ' · ' + money(res.total) : 'Клиент, дата выдачи, сумма, аванс')];
+    if (!res) {
+      nodes.push(customerPicker(f.cust, upd, false));
+      nodes.push(el('div', { class: 'field' }, [el('label', { text: 'Дата выдачи' }),
+        el('input', { class: 'input', type: 'date', value: f.date || '', oninput: function (e) { f.date = e.target.value; upd(); } })]));
+      nodes.push(el('div', { class: 'field' }, [el('label', { text: 'Сумма заказа' }),
+        el('input', { class: 'input num', inputmode: 'numeric', value: f.price || '', oninput: function (e) { f.price = e.target.value; upd(); } })]));
+    }
+    nodes.push(el('div', { class: 'field' }, [el('label', { text: res ? 'Аванс' : 'Аванс (0 или пусто — бронь без аванса)' }),
+      el('input', { class: 'input num', inputmode: 'numeric', value: f.advance || '', oninput: function (e) { f.advance = e.target.value; upd(); } })]));
+    nodes.push(chips([['cash', 'Нал'], ['card', 'Безнал']], f.method, function (k) { f.method = k; render(); }));
+    nodes.push(hint);
+    app.replaceChildren.apply(app, nodes);
+    upd();
+  };
+
+  SCREENS.assemble = function () {
+    backButton(true);
+    var f = state.form;
+    f.lines = f.lines || [{ item_id: '', qty: '' }];
+    function upd() {
+      var c = cleanLines(f.lines, false);
+      mainButton(state.sending ? 'Проводим…' : 'Собрано — списать со склада', !!c.lines && !state.sending, function () {
+        submitOp('preorder_assemble', { receipt_id: f.pre.receipt_id, items: c.lines }, 'Предзаказ собран', function () { state.screen = 'preorders'; render(); });
+      });
+    }
+    app.replaceChildren(title('Сборка: ' + f.pre.customer, 'Состав букета со склада'), linesEditor(f.lines, {}, upd));
+    upd();
+  };
+
+  SCREENS.pickup = function () {
+    backButton(true);
+    var f = state.form;
+    var p = f.pre;
+    var hint = el('div', {});
+    function upd() {
+      var pay = f.method === 'debt' ? (f.now === '' || f.now == null ? 0 : intOf(f.now)) : p.unpaid;
+      var err = pay === null || (f.method === 'debt' && pay >= p.unpaid) ? 'Оплачено сейчас — меньше остатка' : '';
+      hint.replaceChildren(err ? el('div', { class: 'error', text: err })
+        : f.method === 'debt' ? el('div', { class: 'muted num', text: 'В долг: ' + money(p.unpaid - pay) }) : null);
+      var payload = { receipt_id: p.receipt_id, payments: [] };
+      if (f.method === 'debt') { if (pay) payload.payments.push({ method: 'cash', amount: pay }); payload.to_debt = true; }
+      else if (p.unpaid) payload.payments.push({ method: f.method, amount: p.unpaid });
+      var label = !p.unpaid ? 'Выдать'
+        : f.method === 'debt' ? 'Выдать: ' + (pay ? 'оплата ' + money(pay) + ', ' : '') + 'в долг ' + money(p.unpaid - (pay || 0))
+        : 'Выдать, доплата ' + money(p.unpaid);
+      mainButton(state.sending ? 'Проводим…' : label, !err && !state.sending, function () {
+        submitOp('preorder_pickup', payload, 'Выдано', function () { state.screen = 'preorders'; render(); });
+      });
+    }
+    var nodes = [title('Выдача: ' + p.customer, 'Заказ ' + money(p.total) + ' · аванс ' + money(p.paid))];
+    if (p.unpaid) {
+      nodes.push(el('div', { class: 'card' }, [el('div', { class: 'sum' }, [el('span', { text: 'К доплате' }), el('span', { class: 'big num', text: money(p.unpaid) })])]));
+      nodes.push(chips([['cash', 'Нал'], ['card', 'Безнал'], ['debt', 'Остаток в долг']], f.method, function (k) { f.method = k; render(); }));
+      if (f.method === 'debt') {
+        nodes.push(el('div', { class: 'field' }, [el('label', { text: 'Оплачено сейчас наличными (необязательно)' }),
+          el('input', { class: 'input num', inputmode: 'numeric', value: f.now || '', oninput: function (e) { f.now = e.target.value; upd(); } })]));
+      }
+    } else nodes.push(el('div', { class: 'muted', text: 'Заказ оплачен полностью.' }));
+    nodes.push(hint);
+    app.replaceChildren.apply(app, nodes);
+    upd();
+  };
 
   // ---------- проведение ----------
 
