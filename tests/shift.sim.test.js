@@ -554,3 +554,20 @@ test('отмена предзаказа владелицей: аванс вер�
   w.post('s_owner', 'preorder_cancel', { receipt_id: p2.result.receipt_id, reason: 'не пришла' });
   assert.equal(Ops.shiftReport(w.view(), w.view().openShift().shift_id).card_total, 1000);
 });
+
+test('обезличивание: имя стёрто, долг и отчёты сохранены, из списков исчез; сотрудник теряет доступ', () => {
+  const w = world();
+  openGolden(w);
+  w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 3000, payments: [], debt_customer: { new_customer: { name: 'Айгуль', note: 'сосед' } } });
+  const id = w.customerId('Айгуль');
+  assert.throws(() => w.post('s_anna', 'anonymize', { customer_id: id }), { code: 'FORBIDDEN' });
+  w.post('s_owner', 'anonymize', { customer_id: id });
+  const c = w.store.tables.customers.find((x) => x.customer_id === id);
+  assert.deepEqual([c.name, c.note, c.anonymized], ['Обезличен', '', true]);
+  assert.equal(w.view().debtOf(id), 3000, 'долг остаётся');
+  assert.equal(Ops.shiftReport(w.view(), w.view().openShift().shift_id).sales_debt, 3000);
+  assert.throws(() => w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [], debt_customer: { customer_id: id } }), { code: 'UNKNOWN_CUSTOMER' });
+  w.post('s_owner', 'anonymize', { staff_id: 's_mira' });
+  const m = w.store.tables.staff.find((x) => x.staff_id === 's_mira');
+  assert.deepEqual([m.name, m.telegram_id, m.active], ['Сотрудник (обезличен)', '', false]);
+});

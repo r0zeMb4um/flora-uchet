@@ -752,6 +752,27 @@ var Ops = (function () {
     plan.result = { staff_id: s.staff_id, active: p.active };
   };
 
+  /**
+   * Обезличить покупателя или сотрудника (ТЗ, «Законодательство»: удаление по запросу).
+   * Имя и пометка стираются, суммы в отчётах и долги остаются. Сотрудник при этом теряет доступ.
+   */
+  H.anonymize = function (view, p, plan) {
+    requireOwner(view);
+    if (p.customer_id) {
+      var c = view.customer(p.customer_id);
+      if (!c) throw opsError('UNKNOWN_CUSTOMER', 'Нет такого покупателя');
+      update(plan, 'customers', { customer_id: c.customer_id, client_id: plan.client_id }, c,
+        { name: 'Обезличен', note: '', phone: '', phone_consent_at: '', anonymized: true });
+      plan.result = { customer_id: c.customer_id };
+      return;
+    }
+    var s = view.staff(p.staff_id);
+    if (!s || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет такого сотрудника');
+    update(plan, 'staff', { staff_id: s.staff_id, client_id: plan.client_id }, s,
+      { name: 'Сотрудник (обезличен)', telegram_id: '', active: false });
+    plan.result = { staff_id: s.staff_id };
+  };
+
   H.owner_expense = function (view, p, plan) {
     requireOwner(view);
     var month = p.month;

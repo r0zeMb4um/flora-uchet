@@ -216,7 +216,10 @@
           el('button', { class: 'btn', onclick: function () { openClose(); } }, ['Закрыть смену'])
         ]));
       } else {
-        nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
+        nodes.push(el('div', { class: 'card card--note' }, [el('div', {
+          text: state.data.me.role === 'owner'
+            ? 'Касса — для флористов смены. Отчёты, сотрудники, расходы месяца и предзаказы — в чате бота.'
+            : 'Вы не работаете в этой смене.' })]));
       }
     }
     app.replaceChildren.apply(app, nodes);

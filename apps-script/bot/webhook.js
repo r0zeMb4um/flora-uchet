@@ -138,6 +138,10 @@ var Webhook = (function () {
       var inv = validInvite_(store, token);
       if (!inv) return null;
       var now = nowIso();
+      // Один Telegram — один сотрудник в магазине: прежняя привязка этого аккаунта снимается.
+      store.rows('staff').filter(function (s) {
+        return s.client_id === inv.client_id && s.telegram_id === tgId && s.staff_id !== inv.staff_id;
+      }).forEach(function (s) { store.update('staff', { staff_id: s.staff_id, client_id: s.client_id }, { telegram_id: '' }); });
       store.update('staff', { staff_id: inv.staff_id, client_id: inv.client_id },
         { telegram_id: tgId, consent_at: now, consent_version: CONSENT_VERSION });
       store.update('invites', { token: token }, { status: 'used', used_by_telegram_id: tgId });

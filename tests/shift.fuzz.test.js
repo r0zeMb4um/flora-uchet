@@ -20,7 +20,8 @@ function rng(seed) {
   };
 }
 
-const ITEMS = ['rose', 'tulip', 'eucalyptus', 'kraft', 'bear'];
+const BASE_ITEMS = ['rose', 'tulip', 'eucalyptus', 'kraft', 'bear'];
+let ITEMS = BASE_ITEMS.slice();
 const FLORISTS = ['s_a', 's_b', 's_c'];
 const STEP_NAMES = ['logged', 'facts:receipts', 'facts:payments', 'facts:stock_moves', 'facts:debt_moves', 'facts:cash_ops', 'updates', 'stock'];
 
@@ -33,7 +34,7 @@ function setup() {
     { staff_id: 's_b', client_id: 'c1', point_id: 'p1', name: 'Б', role: 'florist', shift_rate: 4000, pct_bp: 250, active: true },
     { staff_id: 's_c', client_id: 'c1', point_id: 'p1', name: 'В', role: 'florist', shift_rate: 6000, pct_bp: 0, active: true }
   ]);
-  store.seed('catalog', ITEMS.map((id, i) => ({
+  store.seed('catalog', BASE_ITEMS.map((id, i) => ({
     item_id: id, client_id: 'c1', name: 'Позиция ' + id, category: 'flowers', unit: 'шт',
     sale_price: 500 * (i + 1), last_cost: 200 * (i + 1), min_stock: 5, status: 'active'
   })));
@@ -41,6 +42,7 @@ function setup() {
 }
 
 function runScenario(seed, steps) {
+  ITEMS = BASE_ITEMS.slice();
   const R = rng(seed);
   const int = (a, b) => a + Math.floor(R() * (b - a + 1));
   const pick = (arr) => arr[int(0, arr.length - 1)];
@@ -159,7 +161,33 @@ function runScenario(seed, steps) {
     } else if (r < 77) {
       post(who, 'pay_adjust', { staff_id: pick(FLORISTS), amount: int(1, 3000) });
     } else if (r < 80) {
-      post('s_owner', 'owner_expense', { month: '2026-11', item: 'Аренда', amount: int(1, 100000) });
+      const k = int(0, 4);
+      if (k === 0) post('s_owner', 'owner_expense', { month: '2026-11', item: 'Аренда', amount: int(1, 100000) });
+      else if (k === 1) {
+        // Отмена предзаказа владелицей: аванс вернуть наличными/на карту или оставить, букет на склад.
+        const pre = myReceipts.filter((x) => x.type === 'preorder' && x.status === 'posted' && (x.assembly_status === 'waiting' || x.assembly_status === 'assembled'));
+        if (pre.length) {
+          const p = pick(pre);
+          const paid = v.rows('payments').filter((x) => x.receipt_id === p.receipt_id).reduce((a, x) => a + (x.kind === 'refund' ? -x.amount : x.amount), 0);
+          const mode = int(0, 2);
+          post('s_owner', 'preorder_cancel', {
+            receipt_id: p.receipt_id, reason: 'отказ', return_stock: R() < 0.5,
+            refund: mode === 2 || paid <= 0 ? undefined : { method: mode ? 'card' : 'cash', amount: int(1, paid + 100) }
+          });
+        }
+      } else if (k === 2) {
+        post(who, 'reserve', { customer: { new_customer: { name: 'Б' + int(1, 5), confirm_new: true } }, pickup_date: '2026-11-25', price: int(1, 20000) });
+      } else if (k === 3) {
+        const res = v.rows('reservations').filter((x) => x.status === 'active');
+        if (res.length) {
+          const x = pick(res);
+          if (R() < 0.7) post(who, 'preorder', { reservation_id: x.reservation_id, payments: [{ method: pick(['cash', 'card']), amount: int(1, x.total) }] });
+          else post(who, 'reserve_cancel', { reservation_id: x.reservation_id });
+        }
+      } else {
+        const item = post(who, 'new_item', { category: 'flowers', name: 'Новая ' + int(1, 3), sale_price: int(100, 3000), confirm_new: R() < 0.5 });
+        if (item) ITEMS.push(item.result.item_id);
+      }
     } else if (r < 88) {
       // Закрытие по порядку ТЗ: инвентаризация (иногда с расхождением) → пересчёт → изъятие.
       const facts = Object.fromEntries(ITEMS.map((id) => [id, Math.max(0, v.stock(id) + (R() < 0.3 ? int(-2, 2) : 0))]));
@@ -232,10 +260,17 @@ function checkInvariants(store, v, seed, log) {
 test('случайные смены: 40 сценариев × 250 шагов, обрывы и повторы — правила учёта не нарушаются', () => {
   let ok = 0;
   let refused = 0;
+  const done = {};
   for (let seed = 1; seed <= 40; seed++) {
     const { log } = runScenario(seed, 250);
     ok += log.filter((l) => l.endsWith('✓')).length;
     refused += log.filter((l) => l.includes('✗')).length;
+    log.filter((l) => l.endsWith('✓')).forEach((l) => { const k = l.split(' ')[0]; done[k] = (done[k] || 0) + 1; });
+  }
+  // Каждая операция реально проводилась, а не только получала отказы.
+  for (const kind of ['sale', 'bouquet', 'preorder', 'preorder_assemble', 'preorder_pickup', 'preorder_cancel', 'reserve', 'reserve_cancel',
+    'income', 'new_item', 'defect', 'refund', 'cancel', 'debt_repay', 'cash_out', 'withdrawal', 'pay_adjust', 'inventory', 'close_shift', 'open_shift']) {
+    assert.ok(done[kind] > 0, 'ни разу не проведено: ' + kind + ' ' + JSON.stringify(done));
   }
   // Сценарии должны реально что-то проводить, а не упираться в отказы.
   assert.ok(ok > 5000, 'проведено ' + ok);
