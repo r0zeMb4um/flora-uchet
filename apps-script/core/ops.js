@@ -493,6 +493,9 @@ var Ops = (function () {
     var money = receiptMoney(view, r.receipt_id);
     var replaced = view.rows('stock_moves').some(function (m) { return m.receipt_id === r.receipt_id && m.type === 'replace'; });
     if (money.refunded > 0 || replaced) throw opsError('HAS_REFUNDS', 'По чеку уже был возврат или замена — отмена невозможна');
+    if (money.debt > 0 && view.debtOf(r.customer_id) < money.debt) {
+      throw opsError('DEBT_REPAID', 'Долг по этому чеку уже частично погашен — оформите возврат, а не отмену');
+    }
     var reason = text(p.reason, 'причина', 200);
     // Товар возвращается на склад.
     view.rows('stock_moves').forEach(function (m) {

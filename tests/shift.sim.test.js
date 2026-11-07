@@ -475,3 +475,12 @@ test('скрытую позицию нельзя продать и принят�
   w.post('s_anna', 'inventory', { facts: { kraft: 50 } });
   assert.equal(w.view().stock('kraft'), 50);
 });
+
+test('чек в долг, который уже частично погасили, отменить нельзя — только возврат', () => {
+  const w = world();
+  openGolden(w);
+  const d = w.post('s_anna', 'sale', { items: [{ item_id: 'toy_bear', qty: 1 }], price: 4500, payments: [], debt_customer: { new_customer: { name: 'Бек' } } });
+  w.post('s_anna', 'debt_repay', { customer_id: w.customerId('Бек'), method: 'cash', amount: 1000 });
+  assert.throws(() => w.post('s_anna', 'cancel', { receipt_id: d.result.receipt_id, reason: 'вернул' }), { code: 'DEBT_REPAID' });
+  assert.equal(w.view().debtOf(w.customerId('Бек')), 3500);
+});
