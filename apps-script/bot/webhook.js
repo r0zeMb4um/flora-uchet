@@ -50,7 +50,11 @@ var Webhook = (function () {
     var from = (msg || cb).from;
     var tgId = String(from.id);
     var chatId = chat.id;
-    if (cb) Tg.call('answerCallbackQuery', { callback_query_id: cb.id });
+    if (cb) {
+      Tg.call('answerCallbackQuery', { callback_query_id: cb.id });
+      // Убираем кнопки из сообщения — повторно нажать уже нельзя.
+      try { Tg.call('editMessageReplyMarkup', { chat_id: chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }); } catch (ignore) { /* сообщение могло устареть */ }
+    }
 
     var text = msg && typeof msg.text === 'string' ? msg.text.trim() : '';
     var data = cb ? String(cb.data || '') : '';
@@ -68,14 +72,32 @@ var Webhook = (function () {
       if (!me) return Tg.send(chatId, 'Нет доступа. Попросите у владелицы магазина ссылку-приглашение.');
       var ctx = { client_id: me.client_id, point_id: me.point_id, staff_id: me.staff_id, role: me.role, now: nowIso(), tg: tgId };
 
-      if (text === 'Открыть смену') return OpenShiftFlow.start(store, ctx, chatId);
+      if (text === 'Открыть смену') { flowDeps_(store, ctx, chatId).state.clear(); return OpenShiftFlow.start(store, ctx, chatId); }
       if (data.indexOf('oc:') === 0) return OpenShiftFlow.onButton(store, ctx, chatId, data, update.update_id);
       if (text && OpenShiftFlow.waitsForInput(ctx)) return OpenShiftFlow.onText(store, ctx, chatId, text);
+      if (ChatFlows.handle(ctx, { text: text, data: data, update_id: update.update_id }, flowDeps_(store, ctx, chatId))) return null;
       return showMenu_(store, chatId, tgId, false);
     } catch (err) {
       if (err.code) return Tg.send(chatId, '⚠️ ' + Tg.esc(err.message)); // отказ по правилу — понятный ответ
       throw err;
     }
+  }
+
+  /** Всё внешнее для сценариев чата: хранилище, отправка, состояние в кэше (15 минут), уведомления. */
+  function flowDeps_(store, ctx, chatId) {
+    var cache = CacheService.getScriptCache();
+    var key = 'fl:' + ctx.tg;
+    return {
+      store: store,
+      miniAppUrl: MINIAPP_URL,
+      send: function (text, rows) { return Tg.send(chatId, text, rows ? { reply_markup: { inline_keyboard: rows } } : undefined); },
+      state: {
+        get: function () { var v = cache.get(key); return v ? JSON.parse(v) : null; },
+        set: function (st) { cache.put(key, JSON.stringify(st), 900); },
+        clear: function () { cache.remove(key); }
+      },
+      notify: function (list) { notify(store, ctx.client_id, list); }
+    };
   }
 
   // ---------- кто пишет ----------
@@ -148,8 +170,11 @@ var Webhook = (function () {
       lines.push(shift ? 'Сейчас открыта смена №' + shift.shift_no + '.' : 'Открытой смены нет.');
       lines.push('Отчёты и настройки появятся на следующем этапе.');
       keyboard = [['Меню']];
+    } else if (shift && view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === me.staff_id; })) {
+      lines.push('Открыта смена №' + shift.shift_no + '. Продажи и закрытие — в кассе: кнопка «Касса» слева от поля ввода.');
+      keyboard = [['Расход', 'Владелица забрала'], ['Погашение долга', 'Отменить продажу'], ['Передать смену']];
     } else if (shift) {
-      lines.push('Открыта смена №' + shift.shift_no + '. Продажи — в кассе: кнопка «Касса» слева от поля ввода.');
+      lines.push('Открыта смена №' + shift.shift_no + ' — вы в ней не работаете.');
       keyboard = [['Меню']];
     } else {
       lines.push('Смена не открыта.');

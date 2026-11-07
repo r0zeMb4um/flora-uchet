@@ -77,7 +77,7 @@ var OpenShiftFlow = (function () {
       var team = [ctx.staff_id];
       if (data !== 'oc:alone') team.push(data.slice(8));
       var res = Posting.post(store, ctx, {
-        op_id: 'tg-' + updateId, kind: 'open_shift', payload: { florist_ids: team, open_cash: st.cash }
+        op_id: 'tg-op-' + String(updateId).padStart(10, '0'), kind: 'open_shift', payload: { florist_ids: team, open_cash: st.cash }
       });
       clear(ctx);
       var r = res.result;

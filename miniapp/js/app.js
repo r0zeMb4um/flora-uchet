@@ -74,7 +74,12 @@
   }
 
   function load() {
-    return api({ action: 'bootstrap' }).then(function (data) { state.data = data; render(); })
+    return api({ action: 'bootstrap' }).then(function (data) {
+      state.data = data;
+      // Ссылка «Закрыть смену в кассе» из чата (передача смены) открывает сразу закрытие.
+      if (location.hash === '#close' && data.shift && data.shift.on_shift) { history.replaceState(null, '', location.pathname); openClose(); return; }
+      render();
+    })
       .catch(function (e) { renderMessage(e.code ? e.message : 'Нет связи с сервером. Проверьте интернет и откройте кассу заново.'); });
   }
 
