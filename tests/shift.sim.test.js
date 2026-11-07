@@ -38,8 +38,14 @@ function world() {
   };
   const view = () => Ops.makeView(store, ctx('s_owner', 'owner'));
   const customerId = (name) => store.tables.customers.find((c) => c.name === name).customer_id;
-  const setClock = (iso) => { clock = Date.parse(iso) - 5 * 3600000 - 60000 + 5 * 3600000; clock = Date.parse(iso) - 60000; };
-  return { store, post, view, customerId, ctx, setClock };
+  /** Закрытие по порядку ТЗ: инвентаризация «всё верно» → закрытие. */
+  const close = (who, payload) => {
+    const v = Ops.makeView(store, ctx(who));
+    const facts = Object.fromEntries(v.balance().map((b) => [b.item_id, b.qty]));
+    post(who, 'inventory', { facts });
+    return post(who, 'close_shift', { expenses_confirmed: true, ...payload });
+  };
+  return { store, post, view, customerId, ctx, close };
 }
 
 /** Старт магазина и «вчерашняя» смена, после которой в кассе остаётся 15 000 ₸ (как в эталоне). */
@@ -51,7 +57,7 @@ function startAndYesterday(w) {
   w.post('s_anna', 'open_shift', { florist_ids: ['s_anna'], open_cash: 0 });
   const y = w.post('s_anna', 'sale', { items: [{ item_id: 'toy_bear', qty: 1 }], price: 30000, payments: [{ method: 'cash', amount: 30000 }] });
   // ЗП Анны: 5 000 + 3% от 30 000 = 5 900; 30 000 − 5 900 − 9 100 = 15 000 на следующую смену.
-  w.post('s_anna', 'close_shift', { counted: 30000, close_withdrawal: 9100, expenses_confirmed: true });
+  w.close('s_anna', { counted: 30000, close_withdrawal: 9100 });
   return { yesterdayReceipt: y.result.receipt_id };
 }
 
@@ -138,6 +144,8 @@ test('эталонная смена №214, проведённая операц�
   assert.equal(r.delivery, 2500);
   assert.equal(r.other, 4000);
   assert.equal(r.withdrawal, 10000);
+  // Тождество отчёта: нал + безнал + в долг + к доплате = выручка.
+  assert.equal(r.sales_cash + r.sales_card + r.sales_debt + r.preorder_unpaid, r.revenue);
   assert.deepEqual(r.income, [{ item_id: 'rose_red_60', qty: 50, cost_sum: 32500 }]);
   assert.deepEqual(r.defects, [{ item_id: 'rose_red_60', qty: -3, reason: 'wilted', cost: exp.defect_cost }]);
   assert.deepEqual(r.adjustments, [{ item_id: 'rose_red_60', qty: -1, cost: exp.inventory_adjust_cost }]);
@@ -260,6 +268,8 @@ test('отказы: склад, оплата, итого, смена, права
   assert.throws(() => w.post('s_anna', 'cash_out', { type: 'rent', amount: 4000 }), { code: 'BAD_INPUT' });
   assert.throws(() => w.post('s_anna', 'debt_opening', { customer: { new_customer: { name: 'X' } }, amount: 1, since_date: '2026-01-01' }), { code: 'FORBIDDEN' });
   assert.throws(() => w.post('s_anna', 'owner_expense', { month: '2026-11', item: 'Аренда', amount: 120000 }), { code: 'FORBIDDEN' });
+  assert.throws(() => w.post('s_anna', 'close_shift', { counted: 15000, expenses_confirmed: true }), { code: 'INVENTORY_REQUIRED' });
+  w.post('s_anna', 'inventory', { facts: { kraft: 61 } });
   assert.throws(() => w.post('s_anna', 'close_shift', { counted: 15000 }), { code: 'CONFIRM_EXPENSES' });
   assert.throws(() => w.post('s_anna', 'sale', SALE, { op_id: 'x' }), { code: 'BAD_OP_ID' });
   assert.throws(() => w.post('s_anna', 'teleport', {}), { code: 'UNKNOWN_OP' });
@@ -333,7 +343,9 @@ test('бронь → предзаказ с авансом → сборка → �
   assert.equal(w.view().debtOf(w.customerId('Дана')), 5000);
   const rep = Ops.shiftReport(w.view(), w.view().openShift().shift_id);
   assert.equal(rep.revenue, 25000);
-  assert.equal(rep.preorder_unpaid, 5000);
+  assert.equal(rep.preorder_unpaid, 0);
+  assert.equal(rep.sales_debt, 5000);
+  assert.equal(rep.sales_cash + rep.sales_card + rep.sales_debt + rep.preorder_unpaid, rep.revenue);
   assert.equal(rep.calc_cash, 25000);
   assert.throws(() => w.post('s_anna', 'preorder_pickup', { receipt_id: id, payments: [] }), { code: 'BAD_STATE' });
 });
@@ -343,7 +355,7 @@ test('доплата за предзаказ в следующей смене н
   openGolden(w);
   const pre = w.post('s_anna', 'preorder', { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-08', price: 25000, payments: [{ method: 'card', amount: 10000 }] });
   w.post('s_anna', 'preorder_assemble', { receipt_id: pre.result.receipt_id, items: [{ item_id: 'chrysanthemum', qty: 5 }] });
-  w.post('s_anna', 'close_shift', { counted: 15000, close_withdrawal: 0, expenses_confirmed: true });
+  w.close('s_anna', { counted: 15000, close_withdrawal: 0 });
   // ЗП: по 5 000 + round(25 000 × 3% / 2) = 5 375 каждой → 15 000 − 10 750 = 4 250 на следующую смену.
   const o = w.post('s_mira', 'open_shift', { florist_ids: ['s_mira'], open_cash: 4250 });
   assert.equal(o.result.open_diff, 0);
@@ -359,7 +371,7 @@ test('закрытие без денег на ЗП (D18) и передача с�
   startAndYesterday(w);
   w.post('s_anna', 'open_shift', { florist_ids: ['s_anna', 's_mira'], open_cash: 15000 });
   w.post('s_anna', 'withdrawal', { amount: 15000 });
-  const c = w.post('s_anna', 'close_shift', { counted: 6000, close_withdrawal: 0, expenses_confirmed: true });
+  const c = w.close('s_anna', { counted: 6000, close_withdrawal: 0 });
   assert.deepEqual(c.result.payroll_paid, { s_anna: 3000, s_mira: 3000 });
   assert.deepEqual(c.result.payroll_unpaid, { s_anna: 2000, s_mira: 2000 });
   assert.equal(c.result.next_cash, 0);
@@ -405,4 +417,61 @@ test('расходы месяца владелицы не попадают в к
   w.post('s_owner', 'owner_expense', { month: '2026-11', item: 'Аренда', amount: 120000 });
   assert.equal(Ops.shiftReport(w.view(), w.view().openShift().shift_id).calc_cash, 15000);
   assert.equal(w.store.tables.owner_expenses.length, 1);
+});
+
+// ---------- найдено при аудите ----------
+
+test('отчёт закрытой смены не меняется задним числом, когда предзаказ доплатили позже', () => {
+  const w = world();
+  openGolden(w);
+  const pre = w.post('s_anna', 'preorder', { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-08', price: 25000, payments: [{ method: 'card', amount: 10000 }] });
+  const shiftId = w.view().openShift().shift_id;
+  w.post('s_anna', 'preorder_assemble', { receipt_id: pre.result.receipt_id, items: [{ item_id: 'kraft', qty: 1 }] });
+  w.close('s_anna', { counted: 15000, close_withdrawal: 0 });
+  const before = Ops.shiftReport(w.view(), shiftId);
+  w.post('s_mira', 'open_shift', { florist_ids: ['s_mira'], open_cash: 4250 });
+  w.post('s_mira', 'preorder_pickup', { receipt_id: pre.result.receipt_id, payments: [], to_debt: true });
+  assert.deepEqual(Ops.shiftReport(w.view(), shiftId), before);
+  assert.equal(before.preorder_unpaid, 15000);
+});
+
+test('отмену предзаказа делает только владелица; чек с заменой отменить нельзя', () => {
+  const w = world();
+  openGolden(w);
+  const pre = w.post('s_anna', 'preorder', { customer: { new_customer: { name: 'Дана' } }, pickup_date: '2026-11-08', price: 5000, payments: [{ method: 'cash', amount: 1000 }] });
+  assert.throws(() => w.post('s_anna', 'cancel', { receipt_id: pre.result.receipt_id, reason: 'x' }), { code: 'FORBIDDEN' });
+  const r = w.post('s_anna', 'sale', SALE);
+  w.post('s_anna', 'refund', { receipt_id: r.result.receipt_id, mode: 'replace', items: [{ item_id: 'rose_red_60', qty: 1 }] });
+  assert.throws(() => w.post('s_anna', 'cancel', { receipt_id: r.result.receipt_id, reason: 'x' }), { code: 'HAS_REFUNDS' });
+});
+
+test('один и тот же покупатель не задваивается по имени', () => {
+  const w = world();
+  openGolden(w);
+  const debt = (cust) => w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [], debt_customer: cust });
+  debt({ new_customer: { name: 'Айгуль', note: 'соседний магазин' } });
+  assert.throws(() => debt({ new_customer: { name: 'айгуль' } }), (e) => e.code === 'SIMILAR_CUSTOMERS' && e.details.length === 1);
+  debt({ customer_id: w.customerId('Айгуль') });
+  assert.equal(w.view().debtOf(w.customerId('Айгуль')), 600);
+  debt({ new_customer: { name: 'Айгуль', note: 'другая, с рынка', confirm_new: true } });
+  assert.equal(w.store.tables.customers.filter((c) => c.name === 'Айгуль').length, 2);
+});
+
+test('отключённый флорист теряет доступ сразу, даже посреди смены', () => {
+  const w = world();
+  openGolden(w);
+  w.store.update('staff', { staff_id: 's_mira' }, { active: false });
+  assert.throws(() => w.post('s_mira', 'sale', SALE), { code: 'FORBIDDEN' });
+  w.post('s_anna', 'sale', SALE);
+});
+
+test('скрытую позицию нельзя продать и принять, но можно списать и пересчитать', () => {
+  const w = world();
+  openGolden(w);
+  w.store.update('catalog', { item_id: 'kraft' }, { status: 'hidden' });
+  assert.throws(() => w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [{ method: 'cash', amount: 300 }] }), { code: 'UNKNOWN_ITEM' });
+  assert.throws(() => w.post('s_anna', 'income', { lines: [{ item_id: 'kraft', qty: 1, cost_sum: 100 }], supplier: 'x' }), { code: 'UNKNOWN_ITEM' });
+  w.post('s_anna', 'defect', { lines: [{ item_id: 'kraft', qty: 1, reason: 'broken' }] });
+  w.post('s_anna', 'inventory', { facts: { kraft: 50 } });
+  assert.equal(w.view().stock('kraft'), 50);
 });

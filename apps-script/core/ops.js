@@ -51,6 +51,11 @@ var Ops = (function () {
       ctx: ctx,
       rows: rows,
       stock: stock,
+      balance: function () {
+        return store.rows('stock_balance').filter(function (b) {
+          return b.client_id === ctx.client_id && b.point_id === ctx.point_id;
+        });
+      },
       openShift: function () {
         return rows('shifts').filter(function (s) { return s.status === 'open'; })[0] || null;
       },
@@ -154,13 +159,15 @@ var Ops = (function () {
     if (!shift) throw opsError('NO_OPEN_SHIFT', 'Смена не открыта — сначала нажмите «Открыть смену»');
     var onShift = view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === view.ctx.staff_id; });
     if (!onShift) throw opsError('NOT_ON_SHIFT', 'Вы не работаете в открытой смене');
+    var me = view.staff(view.ctx.staff_id);
+    if (!me || me.active !== true) throw opsError('FORBIDDEN', 'Доступ отключён владелицей');
     plan.shift_id = shift.shift_id;
     return shift;
   }
 
-  function activeItem(view, id) {
+  function activeItem(view, id, allowHidden) {
     var it = view.item(id);
-    if (!it || it.status === 'hidden') throw opsError('UNKNOWN_ITEM', 'Нет такой позиции в каталоге: ' + id);
+    if (!it || (it.status === 'hidden' && !allowHidden)) throw opsError('UNKNOWN_ITEM', 'Нет такой позиции в каталоге: ' + id);
     return it;
   }
 
@@ -173,9 +180,16 @@ var Ops = (function () {
       return c.customer_id;
     }
     var n = ref.new_customer || {};
+    var name = text(n.name, 'имя покупателя', 60);
+    var same = view.rows('customers').filter(function (c) {
+      return c.anonymized !== true && String(c.name).toLowerCase() === name.toLowerCase();
+    }).map(function (c) { return { customer_id: c.customer_id, name: c.name, note: c.note }; });
+    if (same.length && n.confirm_new !== true) {
+      throw opsError('SIMILAR_CUSTOMERS', 'Покупатель с таким именем уже есть — выберите его или подтвердите нового', same);
+    }
     var row = add(plan, view, 'customers', {
       customer_id: nextId(plan, 'cu'),
-      name: text(n.name, 'имя покупателя', 60),
+      name: name,
       note: optText(n.note, 'пометка', 100),
       phone: '', phone_consent_at: '', anonymized: false // телефоны на этапе 1 не храним
     });
@@ -187,7 +201,7 @@ var Ops = (function () {
     opts = opts || {};
     var need = {};
     lines.forEach(function (l) {
-      activeItem(view, l.item_id);
+      activeItem(view, l.item_id, opts.allowHidden);
       posInt(l.qty, 'количество');
       need[l.item_id] = (need[l.item_id] || 0) + l.qty;
     });
@@ -445,7 +459,7 @@ var Ops = (function () {
     var lines = list(p.lines, 'строки').map(function (l) {
       return { item_id: l.item_id, qty: posInt(l.qty, 'количество'), reason: oneOf(l.reason, DEFECT_REASONS, 'причина') };
     });
-    moveStock(plan, view, lines, 'defect', { sign: -1 });
+    moveStock(plan, view, lines, 'defect', { sign: -1, allowHidden: true });
     plan.result = {
       cost: lines.reduce(function (a, l) { return a + C.lossCost(l.qty, view.item(l.item_id).last_cost); }, 0)
     };
@@ -475,8 +489,10 @@ var Ops = (function () {
     var r = view.receipt(p.receipt_id);
     if (!r || r.status !== 'posted') throw opsError('UNKNOWN_RECEIPT', 'Чек не найден или уже отменён');
     if (r.shift_id !== shift.shift_id) throw opsError('NOT_THIS_SHIFT', 'Отменить можно только чек текущей смены');
+    if (r.type === 'preorder') throw opsError('FORBIDDEN', 'Отмену предзаказа делает владелица');
     var money = receiptMoney(view, r.receipt_id);
-    if (money.refunded > 0) throw opsError('HAS_REFUNDS', 'По чеку уже был возврат — отмена невозможна');
+    var replaced = view.rows('stock_moves').some(function (m) { return m.receipt_id === r.receipt_id && m.type === 'replace'; });
+    if (money.refunded > 0 || replaced) throw opsError('HAS_REFUNDS', 'По чеку уже был возврат или замена — отмена невозможна');
     var reason = text(p.reason, 'причина', 200);
     // Товар возвращается на склад.
     view.rows('stock_moves').forEach(function (m) {
@@ -569,7 +585,7 @@ var Ops = (function () {
     var ids = Object.keys(facts);
     if (!ids.length) throw opsError('BAD_INPUT', 'Нет позиций для инвентаризации');
     var bal = {};
-    ids.forEach(function (id) { activeItem(view, id); nonNegInt(facts[id], 'факт'); bal[id] = view.stock(id); });
+    ids.forEach(function (id) { activeItem(view, id, true); nonNegInt(facts[id], 'факт'); bal[id] = view.stock(id); });
     var adj = C.inventoryAdjust(bal, facts);
     var out = [];
     Object.keys(adj).forEach(function (id) {
@@ -602,6 +618,8 @@ var Ops = (function () {
 
   H.close_shift = function (view, p, plan) {
     var shift = requireShift(view, plan);
+    var inventoried = view.rows('ops_log').some(function (o) { return o.kind === 'inventory' && o.shift_id === shift.shift_id; });
+    if (!inventoried) throw opsError('INVENTORY_REQUIRED', 'Сначала инвентаризация: шаг 1 закрытия смены');
     if (p.expenses_confirmed !== true) throw opsError('CONFIRM_EXPENSES', 'Подтвердите, что все доставки, расходы и изъятия внесены');
     var n = shiftNumbers(view, shift);
     var staff = view.shiftStaff(shift.shift_id);
@@ -674,9 +692,15 @@ var Ops = (function () {
     var isIn = function (p) { return p.kind !== 'refund'; };
     var byOwn = function (p) { return isIn(p) && p.receipt_id && own[p.receipt_id]; };
     var byPrior = function (p) { return isIn(p) && !(p.receipt_id && own[p.receipt_id]); };
+    // Только деньги и долги этой смены: отчёт закрытой смены не меняется задним числом.
+    var debtMoves = view.rows('debt_moves').filter(function (m) { return m.shift_id === shiftId; });
+    var ownDebt = function (id) {
+      return debtMoves.filter(function (m) { return m.receipt_id === id && (m.type === 'sale' || m.type === 'pickup'); })
+        .reduce(function (a, m) { return a + m.amount; }, 0);
+    };
     var preorderUnpaid = Object.keys(own).filter(function (id) { return own[id].type === 'preorder'; })
       .reduce(function (a, id) {
-        return a + own[id].total - sumWhere(n.payments, function (p) { return p.receipt_id === id && isIn(p); });
+        return a + own[id].total - ownDebt(id) - sumWhere(n.payments, function (p) { return p.receipt_id === id && isIn(p); });
       }, 0);
     var moves = view.rows('stock_moves').filter(function (m) { return m.shift_id === shiftId; });
     var item = function (id) { return view.item(id) || { name: id, last_cost: 0 }; };
@@ -684,7 +708,7 @@ var Ops = (function () {
     var pay = C.payroll(n.revenue.revenue, staff);
     var paidBy = function (sid) { return sumWhere(n.cash_ops, function (o) { return o.staff_id === sid && (o.type === 'rate' || o.type === 'pct'); }); };
     var balance = {};
-    store_rows_balance(view).forEach(function (b) { balance[b.item_id] = b.qty; });
+    view.balance().forEach(function (b) { balance[b.item_id] = b.qty; });
     var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; });
     return {
       shift_id: shiftId, shift_no: shift.shift_no, shift_date: shift.shift_date,
@@ -693,7 +717,7 @@ var Ops = (function () {
       discounts: n.revenue.discounts_total, cancelled_count: n.revenue.cancelled_count,
       sales_cash: sumWhere(n.payments, function (p) { return byOwn(p) && p.method === 'cash'; }),
       sales_card: sumWhere(n.payments, function (p) { return byOwn(p) && p.method === 'card'; }),
-      sales_debt: Object.keys(own).reduce(function (a, id) { return a + (own[id].debt_amount || 0); }, 0),
+      sales_debt: Object.keys(own).reduce(function (a, id) { return a + ownDebt(id); }, 0),
       preorder_unpaid: preorderUnpaid,
       prior_cash: sumWhere(n.payments, function (p) { return byPrior(p) && p.method === 'cash'; }),
       prior_card: sumWhere(n.payments, function (p) { return byPrior(p) && p.method === 'card'; }),
@@ -723,21 +747,9 @@ var Ops = (function () {
     };
   }
 
-  function store_rows_balance(view) {
-    return view._balance ? view._balance() : [];
-  }
-
   return {
     opsError: opsError,
-    makeView: function (store, ctx) {
-      var v = makeView(store, ctx);
-      v._balance = function () {
-        return store.rows('stock_balance').filter(function (b) {
-          return b.client_id === ctx.client_id && b.point_id === ctx.point_id;
-        });
-      };
-      return v;
-    },
+    makeView: makeView,
     build: build,
     shiftReport: shiftReport,
     POINT_SHEETS: POINT_SHEETS
