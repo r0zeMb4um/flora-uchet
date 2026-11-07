@@ -41,6 +41,20 @@ function health_() {
       out.shift_opened = store.rows('shifts').length > 0;
       out.stock_ready = store.rows('stock_balance').length > 0;
       out.errors_logged = store.rows('audit').filter(function (a) { return a.action === 'error'; }).length;
+      // Только количества — для проверки защиты от дублей (без сумм и имён).
+      out.receipts = store.rows('receipts').length;
+      out.ops_not_posted = store.rows('ops_log').filter(function (o) { return o.status !== 'posted'; }).length;
+      out.stock_matches_journal = Posting.reconcileStock !== undefined && (function () {
+        var bal = {};
+        store.rows('stock_balance').forEach(function (b) { bal[b.client_id + b.point_id + b.item_id] = b.qty; });
+        var posted = {};
+        store.rows('ops_log').forEach(function (o) { if (o.status === 'posted') posted[o.op_id] = true; });
+        var sum = {};
+        store.rows('stock_moves').forEach(function (m) {
+          if (posted[m.op_id]) { var k = m.client_id + m.point_id + m.item_id; sum[k] = (sum[k] || 0) + m.qty; }
+        });
+        return Object.keys(bal).every(function (k) { return bal[k] === (sum[k] || 0); });
+      })();
     }
   } catch (err2) { out.sheets = 'не удалось прочитать: ' + String(err2 && err2.message || err2).slice(0, 200); }
   return out;
