@@ -10,9 +10,9 @@
 - [x] Имя и почта для git (только для этой папки) и первый коммит.
 - [x] Google-аккаунт проекта: flora.uchet.kz@gmail.com.
 - [x] Apps Script API включён: https://script.google.com/home/usersettings → «Google Apps Script API» → Вкл.
-- [ ] clasp установлен (`npm install -g @google/clasp`) и `clasp login` выполнен.
+- [x] clasp 3.4.1 установлен, вход от flora.uchet.kz@gmail.com. В PowerShell запускать через `npx.cmd @google/clasp@3.4.1 …` (скрипты .ps1 запрещены политикой Windows).
 - [x] Бот создан в @BotFather (@flora_uchet_bot) (`/newbot`). Токен не вставлять в чат и файлы — только в Script Properties.
-- [ ] GitHub-аккаунт и пустой репозиторий проекта.
+- [ ] GitHub: аккаунт r0zeMb4um есть; включить двухэтапную проверку; создать репозиторий flora-uchet.
 
 **Нужно к началу этапа C.**
 
