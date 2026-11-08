@@ -134,7 +134,7 @@ var MiniApi = (function () {
   var OWNER_KINDS = {
     correction: true, anonymize: true, catalog_edit: true, new_item: true,
     staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
-    preorder_cancel: true
+    preorder_cancel: true, stock_start: true, debt_opening: true
   };
 
   /** Одноразовый токен приглашения (не короче 16 символов). */

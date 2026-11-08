@@ -85,16 +85,39 @@ var Ops = (function () {
     return v;
   }
   function optText(v, name, max) { return v == null || v === '' ? '' : text(v, name, max); }
+  // Предел одного числа — 999 999 999 (как в кассе: не больше 9 цифр). Иначе опечатка в 12 цифр сломала бы расчёт процента при закрытии смены.
+  var MAX_NUM = 999999999;
   function posInt(v, name) {
     if (!Number.isSafeInteger(v) || v <= 0) throw opsError('BAD_INPUT', 'Поле «' + name + '» — целое число больше нуля');
+    if (v > MAX_NUM) throw opsError('BAD_INPUT', 'Поле «' + name + '»: слишком большое число, проверьте нули');
     return v;
   }
   function nonNegInt(v, name) {
     if (!Number.isSafeInteger(v) || v < 0) throw opsError('BAD_INPUT', 'Поле «' + name + '» — целое число не меньше нуля');
+    if (v > MAX_NUM) throw opsError('BAD_INPUT', 'Поле «' + name + '»: слишком большое число, проверьте нули');
     return v;
   }
+  /** Цена и скидка из запроса: целые числа в пределах MAX_NUM (расчёт чека — в calc.js). */
+  function checkedPrice(price, discount) {
+    posInt(price, 'цена');
+    if (discount && discount.value !== undefined) nonNegInt(discount.value, 'скидка');
+    return price;
+  }
+
   function dateStr(v, name) {
     if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw opsError('BAD_INPUT', 'Поле «' + name + '» — дата ГГГГ-ММ-ДД');
+    // Настоящая дата календаря: 2026-13-45 или 2026-02-31 не проходят.
+    var d = new Date(v + 'T00:00:00Z');
+    if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) throw opsError('BAD_INPUT', 'Поле «' + name + '»: такой даты нет в календаре');
+    return v;
+  }
+  /** Дата выдачи: не раньше сегодняшнего дня и не позже, чем через год (опечатка в годе не должна «потеряться» в календаре выдач). */
+  function pickupDate(view, v, name) {
+    dateStr(v, name);
+    var today = view.ctx.now.slice(0, 10);
+    var last = new Date(Date.parse(today + 'T00:00:00Z') + 366 * 86400000).toISOString().slice(0, 10);
+    if (v < today) throw opsError('BAD_INPUT', 'Дата выдачи уже прошла — выберите сегодняшнюю или более позднюю');
+    if (v > last) throw opsError('BAD_INPUT', 'Дата выдачи дальше чем через год — проверьте год');
     return v;
   }
   function oneOf(v, list, name) {
@@ -293,7 +316,7 @@ var Ops = (function () {
         throw opsError('SHIFT_CHANGED', 'Продажа оформлялась в смене №' + p.shift_no + ', а сейчас открыта смена №' + shift.shift_no + ' — она не проведена. Оформите её заново.');
       }
       var items = list(p.items, 'позиции');
-      var r = C.receiptTotal(p.price, p.discount);
+      var r = C.receiptTotal(checkedPrice(p.price, p.discount), p.discount);
       var pays = payments(p.payments);
       var paid = sumAmounts(pays);
       var debt = 0;
@@ -339,8 +362,8 @@ var Ops = (function () {
     } else {
       customerId = customerRef(view, plan, p.customer);
     }
-    var r = C.receiptTotal(src.price, src.discount);
-    var pickup = dateStr(src.pickup_date, 'дата выдачи');
+    var r = C.receiptTotal(reservation ? src.price : checkedPrice(src.price, src.discount), src.discount);
+    var pickup = (reservation ? dateStr(src.pickup_date, 'дата выдачи') : pickupDate(view, src.pickup_date, 'дата выдачи'));
     var pays = payments(p.payments);
     var paid = sumAmounts(pays);
     if (paid <= 0) throw opsError('NO_ADVANCE', 'Предзаказ без аванса оформляется как бронь');
@@ -363,11 +386,11 @@ var Ops = (function () {
 
   H.reserve = function (view, p, plan) {
     var shift = requireShift(view, plan);
-    var r = C.receiptTotal(p.price, p.discount);
+    var r = C.receiptTotal(checkedPrice(p.price, p.discount), p.discount);
     var id = 'rs-' + plan.op_id;
     add(plan, view, 'reservations', {
       reservation_id: id, shift_id: shift.shift_id, customer_id: customerRef(view, plan, p.customer),
-      pickup_date: dateStr(p.pickup_date, 'дата выдачи'), price: r.price,
+      pickup_date: pickupDate(view, p.pickup_date, 'дата выдачи'), price: r.price,
       discount_kind: (p.discount && p.discount.kind) || 'none', discount_value: (p.discount && p.discount.value) || 0,
       discount_amount: r.discount_amount, total: r.total, status: 'active', receipt_id: '', created_by: view.ctx.staff_id
     });
@@ -990,7 +1013,7 @@ var Ops = (function () {
     requireOwner(view);
     var month = p.month;
     if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw opsError('BAD_INPUT', 'Месяц в виде ГГГГ-ММ');
-    if (!Number.isSafeInteger(p.amount) || p.amount === 0) throw opsError('BAD_INPUT', 'Сумма — целое число, не ноль');
+    if (!Number.isSafeInteger(p.amount) || p.amount === 0 || Math.abs(p.amount) > MAX_NUM) throw opsError('BAD_INPUT', 'Сумма — целое число, не ноль и не больше 999 999 999');
     add(plan, view, 'owner_expenses', {
       expense_id: nextId(plan, 'ex'), month: month, item: text(p.item, 'статья', 60), amount: p.amount,
       comment: optText(p.comment, 'комментарий', 200), created_by: view.ctx.staff_id

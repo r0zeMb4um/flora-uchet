@@ -66,7 +66,8 @@ var Posting = (function () {
     recomputeStock(store, plan.client_id, plan.point_id, plan.stock_items, plan.op_id, ctx.now);
     step('stock');
     store.update('ops_log', { op_id: plan.op_id }, {
-      status: 'posted', posted_at: ctx.now, result_json: JSON.stringify(plan.result)
+      status: 'posted', posted_at: ctx.now, result_json: JSON.stringify(plan.result),
+      plan_json: '' // план нужен только для дописывания зависшей операции; проведённой он больше не нужен
     });
     return { status: 'posted', op_id: plan.op_id, result: plan.result, notify: plan.notify };
   }

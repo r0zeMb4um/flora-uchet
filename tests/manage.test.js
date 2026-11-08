@@ -209,3 +209,28 @@ test('предзаказ: владелица отменяет в кассе — 
   assert.equal(call(1, { action: 'bootstrap' }).preorders.length, 0);
   assert.equal(store.tables.receipts.find((r) => r.receipt_id === id).assembly_status, 'cancelled');
 });
+
+// ---------- запуск: начальные остатки и старые долги ----------
+
+test('начальные остатки: владелица вносит в кассе, пока смена закрыта; во время смены и флористу — нельзя', () => {
+  const { call, post } = shop();
+  assert.throws(() => post(777, 'stock_start', { lines: [{ item_id: 'rose', qty: 5 }] }), { code: 'FORBIDDEN' });
+  post(1, 'stock_start', { lines: [{ item_id: 'rose', qty: 120 }] });
+  assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').stock, 120);
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  assert.throws(() => post(1, 'stock_start', { lines: [{ item_id: 'rose', qty: 1 }] }), { code: 'SHIFT_OPEN' });
+  assert.throws(() => post(1, 'stock_start', { lines: [{ item_id: 'rose', qty: 0 }] }));
+});
+
+test('старые долги: запись «с даты», видны в списке должников и у флориста; повтор с тем же ID не удваивает', () => {
+  const { call, store } = shop();
+  const body = { action: 'post', kind: 'debt_opening', op_id: 'op-debt-0000001', payload: { customer: { new_customer: { name: 'Сауле', confirm_new: true } }, amount: 15000, since_date: '2026-09-01', comment: 'из тетради' } };
+  MiniApi.dispatch(store, 1, body, NOW);
+  const again = MiniApi.dispatch(store, 1, body, NOW);
+  assert.equal(again.data.status, 'already');
+  const owner = call(1, { action: 'owner_customers' });
+  assert.deepEqual(owner.map((c) => [c.name, c.debt, c.since]), [['Сауле', 15000, '2026-09-01']]);
+  assert.equal(call(777, { action: 'bootstrap' }).customers.find((c) => c.name === 'Сауле').debt, 15000);
+  assert.throws(() => MiniApi.dispatch(store, 777, { ...body, op_id: 'op-debt-0000002' }, NOW), { code: 'FORBIDDEN' });
+  assert.throws(() => MiniApi.dispatch(store, 1, { ...body, op_id: 'op-debt-0000003', payload: { ...body.payload, since_date: '2026-13-01' } }, NOW), { code: 'BAD_INPUT' });
+});

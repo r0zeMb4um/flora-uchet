@@ -71,7 +71,8 @@ test('выдачи: на дату, не собрано / собрано, бро�
   pre('2026-11-09', 'Бек', 3000);
   post(anna, 'preorder_assemble', { receipt_id: a.result.receipt_id, items: [{ item_id: 'rose', qty: 1 }] });
   post(anna, 'reserve', { customer: { new_customer: { name: 'Сауле' } }, pickup_date: '2026-11-09', price: 5000 });
-  pre('2026-11-05', 'Старый', 1000);
+  // Просроченный заказ: оформлен давно (раньше дату выдачи в прошлом поставить нельзя — D28/аудит).
+  post({ ...anna, now: '2026-11-04T10:00:00+05:00' }, 'preorder', { customer: { new_customer: { name: 'Старый', confirm_new: true } }, pickup_date: '2026-11-05', price: 10000, payments: [{ method: 'cash', amount: 1000 }] });
   const p = Summary.pickups(view(), '2026-11-09');
   assert.deepEqual([p.total, p.waiting, p.assembled, p.reservations, p.overdue], [3, 1, 1, 1, 1]);
   const t = Reports.pickupsText(p, 'Завтра');

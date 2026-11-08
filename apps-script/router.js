@@ -15,7 +15,15 @@ function doPost(e) {
 }
 
 function doGet(e) {
-  if (e && e.parameter && e.parameter.health === '1') return jsonOut_(health_());
+  if (e && e.parameter && e.parameter.health === '1') {
+    // Адрес открытый: ответ держим в кэше на минуту, чтобы частые заходы не жгли квоты Google и не читали таблицу.
+    var cache = CacheService.getScriptCache();
+    var hit = cache.get('health');
+    if (hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON);
+    var body = JSON.stringify(health_());
+    try { cache.put('health', body, 60); } catch (ignore) { /* кэш не обязателен */ }
+    return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
+  }
   return HtmlService.createHtmlOutput('Флора·Учёт работает');
 }
 

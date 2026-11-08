@@ -307,8 +307,16 @@ var Summary = (function () {
     });
     var debtRows = [['Покупатель', 'Пометка', 'Долг, ₸', 'С даты']].concat(debtors(view).map(function (d) { return [d.name, d.note, d.debt, d.since]; }));
     var stockRows = [['Позиция', 'Остаток, шт', 'Минимум, шт']].concat(stock(view).items.map(function (i) { return [i.name, i.qty, i.min]; }));
-    return [{ name: 'Сводка', rows: summaryRows }, { name: 'Смены', rows: shiftRows }, { name: 'Чеки', rows: receiptRows },
-      { name: 'Должники', rows: debtRows }, { name: 'Остатки', rows: stockRows }];
+    return [{ name: 'Сводка', rows: safeRows(summaryRows) }, { name: 'Смены', rows: safeRows(shiftRows) }, { name: 'Чеки', rows: safeRows(receiptRows) },
+      { name: 'Должники', rows: safeRows(debtRows) }, { name: 'Остатки', rows: safeRows(stockRows) }];
+  }
+
+  /** Защита от «формул в ячейках»: текст, начинающийся на = + - @, показываем как обычный текст (апостроф впереди). */
+  function safeCell(v) {
+    return typeof v === 'string' && /^[=+\-@\t\r]/.test(v) ? "'" + v : v;
+  }
+  function safeRows(rows) {
+    return rows.map(function (row) { return row.map(safeCell); });
   }
 
   /** CSV для Excel: разделитель «;», кодировка UTF-8 с BOM, кавычки экранированы. Запасной вариант, если xlsx не получился. */
@@ -323,7 +331,7 @@ var Summary = (function () {
   }
 
   return { period: period, stock: stock, debtors: debtors, months: months, day: day, prevRange: prevRange, top: top,
-    restock: restock, pickups: pickups, exportTables: exportTables, toCsv: toCsv };
+    restock: restock, pickups: pickups, exportTables: exportTables, toCsv: toCsv, safeCell: safeCell };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Summary;

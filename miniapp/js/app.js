@@ -871,13 +871,15 @@
     owner_period: 'owner_period', owner_debtors: 'owner_debtors',
     owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
-    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage'
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage',
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
     owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
-    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders'
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders',
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage'
   };
   function renderNav() {
     var nav = document.getElementById('nav');
@@ -1937,7 +1939,7 @@
     if (!res) {
       nodes.push(customerPicker(f.cust, upd, false));
       nodes.push(el('div', { class: 'field' }, [el('label', { text: 'Дата выдачи' }),
-        el('input', { class: 'input', type: 'date', value: f.date || '', oninput: function (e) { f.date = e.target.value; upd(); } })]));
+        el('input', { class: 'input', type: 'date', min: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10), value: f.date || '', oninput: function (e) { f.date = e.target.value; upd(); } })]));
       nodes.push(el('div', { class: 'field' }, [el('label', { text: 'Сумма заказа' }),
         el('input', { class: 'input num', inputmode: 'numeric', value: f.price || '', oninput: function (e) { f.price = e.target.value; upd(); } })]));
     }
@@ -2140,6 +2142,8 @@
         tile('users', 'Сотрудники', 'флористы, ставки, приглашения', 'owner_team'),
         tile('receipt', 'Расходы месяца', 'аренда, налоги и др.', 'owner_expenses'),
         tile('calendar-heart', 'Предзаказы', 'список и отмена', 'owner_preorders'),
+        tile('clipboard-list', 'Начальные остатки', 'при запуске, до первой смены', 'owner_start_stock'),
+        tile('user-dollar', 'Долги с прошлого', 'тетрадь → касса', 'owner_start_debt'),
         tile('adjustments', 'Настройки', 'размен, напоминание, статьи', 'owner_settings')
       ])
     );
@@ -2259,6 +2263,85 @@
     }
     nodes.push(formField('Причина отмены', el('input', { class: 'input', value: f.reason, maxlength: '200', placeholder: 'например: клиент передумал', oninput: function (e) { f.reason = e.target.value; upd(); } })));
     app.replaceChildren.apply(app, nodes);
+    upd();
+  };
+
+  // ---------- запуск: начальные остатки и старые долги (владелица) ----------
+
+  SCREENS.owner_start_stock = function () {
+    backButton(true);
+    var f = state.form;
+    ownerLoad('owner_catalog', {}, function (list) {
+      var items = list.filter(function (c) { return c.status !== 'hidden'; });
+      if (!f.qty) f.qty = {};
+      var lines = function () {
+        return items.map(function (c) { return { item_id: c.item_id, qty: intOf(f.qty[c.item_id]) }; }).filter(function (l) { return l.qty > 0; });
+      };
+      var upd = function () {
+        var n = lines().length;
+        mainButton(state.sending ? 'Вносим…' : 'Внести остатки' + (n ? ' (' + n + ')' : ''), n > 0 && !state.sending, function () {
+          askOk('Внести начальные остатки по ' + n + ' позициям? Это нужно делать один раз, до первой смены.', function () {
+            submitOp('stock_start', { lines: lines() }, 'Начальные остатки внесены', function () { openScreen('owner_manage'); });
+          });
+        });
+      };
+      var rows = items.map(function (c) {
+        return el('div', { class: 'sum' }, [
+          el('div', {}, [el('div', { text: c.name }), el('div', { class: 'muted num', text: 'сейчас на складе ' + c.stock })]),
+          el('input', { class: 'input num', style: 'max-width:110px', inputmode: 'numeric', placeholder: '0', value: f.qty[c.item_id] || '',
+            'aria-label': 'Сколько внести: ' + c.name, oninput: function (e) { f.qty[c.item_id] = e.target.value; upd(); } })
+        ]);
+      });
+      app.replaceChildren.apply(app, [
+        title('Начальные остатки', 'Сколько чего лежит на складе перед запуском. Внесите цифры по пересчёту.'),
+        el('div', { class: 'card card--note' }, [el('div', { text: 'Вносится только когда смена закрыта. Число прибавляется к текущему остатку, поэтому внесите один раз.' })]),
+        el('div', { class: 'card' }, rows.length ? rows : [el('div', { class: 'muted', text: 'Каталог пуст. Сначала добавьте позиции: «Склад и каталог».' })])
+      ]);
+      upd();
+    });
+  };
+
+  SCREENS.owner_start_debt = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.mode === undefined) { f.mode = 'new'; f.name = ''; f.customer = ''; f.amount = ''; f.since = ''; f.comment = ''; }
+    var debtors = (state.data.customers || []);
+    var amount = intOf(f.amount);
+    var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+    var who = f.mode === 'new' ? f.name.trim().length > 0 : !!f.customer;
+    var datePast = /^\d{4}-\d{2}-\d{2}$/.test(f.since) && f.since <= today;
+    var upd = function () {
+      amount = intOf(f.amount);
+      who = f.mode === 'new' ? f.name.trim().length > 0 : !!f.customer;
+      datePast = /^\d{4}-\d{2}-\d{2}$/.test(f.since) && f.since <= today;
+      mainButton(state.sending ? 'Записываем…' : 'Записать долг' + (amount ? ' ' + money(amount) : ''), who && !!amount && datePast && !state.sending, function () {
+        var customer = f.mode === 'new' ? { new_customer: { name: f.name.trim(), confirm_new: f.confirmNew === true } } : { customer_id: f.customer };
+        var payload = { customer: customer, amount: amount, since_date: f.since, comment: f.comment.trim() };
+        busy(postOp('debt_opening', payload, f.op_id).catch(function (e) {
+          if (e && e.code === 'SIMILAR_CUSTOMERS') { f.similar = true; toast('Покупатель с таким именем уже есть. Выберите его из списка или нажмите «Записать» ещё раз, если это другой человек.', true); return null; }
+          throw e;
+        })).then(function (res) {
+          if (res === null || res === undefined) { if (f.similar) { f.confirmNew = true; } return; }
+          if (res.state) setData(res.state, true);
+          haptic('success'); toast('Долг записан');
+          openScreen('owner_start_debt');
+        });
+      });
+    };
+    app.replaceChildren(
+      title('Долги с прошлого', 'Кто сколько должен по тетради. Записывается один раз на запуске.'),
+      chips([['new', 'Новый покупатель'], ['old', 'Уже есть в кассе']], f.mode, function (k) { f.mode = k; f.similar = false; render(); }),
+      f.mode === 'new'
+        ? formField('Имя покупателя', el('input', { class: 'input', value: f.name, maxlength: '60', oninput: function (e) { f.name = e.target.value; f.confirmNew = false; upd(); } }))
+        : formField('Покупатель', (function () {
+          var sel = el('select', { class: 'input', 'aria-label': 'Покупатель', onchange: function (e) { f.customer = e.target.value; upd(); } },
+            [el('option', { value: '', text: 'Выберите…' })].concat(debtors.map(function (c) { return el('option', { value: c.customer_id, text: c.name + (c.debt ? ' · долг ' + money(c.debt) : '') }); })));
+          sel.value = f.customer; return sel; })()),
+      formField('Сумма долга, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } })),
+      formField('Долг с даты', el('input', { class: 'input', type: 'date', max: today, value: f.since, oninput: function (e) { f.since = e.target.value; upd(); } }),
+        'Нужна, чтобы видеть, какие долги старше 30 дней.'),
+      formField('Комментарий (по желанию)', el('input', { class: 'input', value: f.comment, maxlength: '200', oninput: function (e) { f.comment = e.target.value; } }))
+    );
     upd();
   };
 
