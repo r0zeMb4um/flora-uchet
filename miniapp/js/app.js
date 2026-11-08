@@ -9,8 +9,10 @@
   var app = document.getElementById('app');
   var DRAFT_KEY = 'flora.sale.draft.v1';
   var CATS = { flowers: 'Цветы', greens: 'Зелень', toys: 'Игрушки', baskets: 'Корзины', packaging: 'Упаковка' };
+  var CAT_ICON = { flowers: 'flower', greens: 'leaf', toys: 'gift', baskets: 'basket', packaging: 'package' };
 
-  var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null };
+  var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false };
+  var SCREENS_EARLY = {};
 
   // ---------- общие ----------
 
@@ -27,6 +29,13 @@
     });
     (children || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return e;
+  }
+  function icon(name, cls) { return el('i', { class: 'ti ti-' + name + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' }); }
+  function catIcon(category) { return el('span', { class: 'ico', 'aria-hidden': 'true' }, [icon(CAT_ICON[category] || 'flower')]); }
+  function firstName(name) { return String(name || '').replace(/\s*\(.*\)\s*$/, ''); }
+  function greeting() {
+    var h = new Date(Date.now() + 5 * 3600000).getUTCHours(); // время Алматы
+    return h >= 5 && h < 12 ? 'Доброе утро' : h < 18 && h >= 12 ? 'Добрый день' : 'Добрый вечер';
   }
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -141,10 +150,12 @@
 
   var mainHandler = null;
   function mainButton(text, enabled, onClick) {
-    if (!tg) return;
+    if (!tg) { state.mb = !!text; renderNav(); return; }
     var mb = tg.MainButton;
     if (mainHandler) mb.offClick(mainHandler);
     mainHandler = null;
+    state.mb = !!text;
+    renderNav();
     if (!text) { mb.hide(); return; }
     mb.setText(text);
     if (enabled) mb.enable(); else mb.disable();
@@ -163,6 +174,35 @@
     state.screen = 'main'; render();
   }
 
+  // ---------- нижнее меню ----------
+
+  var NAV_OF = {
+    main: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
+    owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
+    owner_period: 'owner_period', owner_debtors: 'owner_debtors'
+  };
+  function renderNav() {
+    var nav = document.getElementById('nav');
+    if (!nav) return;
+    var d = state.data;
+    var cur = NAV_OF[state.screen];
+    var isOwner = d && d.me.role === 'owner';
+    var onShift = d && d.shift && d.shift.on_shift;
+    if (!d || !cur || state.mb || (!isOwner && !onShift)) { nav.hidden = true; return; }
+    var item = function (key, ic, label) {
+      return el('button', { class: 'nav__item', 'aria-current': cur === key ? 'page' : false,
+        onclick: function () { if (key === 'main') { state.screen = 'main'; render(); } else openScreen(key); } }, [icon(ic), label]);
+    };
+    var items = isOwner
+      ? [item('owner_today', 'home', 'Сегодня'), item('owner_history', 'history', 'История'),
+        item('owner_period', 'chart-line', 'Сводка'), item('owner_debtors', 'users', 'Должники')]
+      : [item('main', 'home', 'Главная'), item('stock', 'box', 'Склад'),
+        el('button', { class: 'nav__plus', 'aria-label': 'Новая продажа', onclick: function () { state.screen = 'sale'; render(); } }, [icon('plus')]),
+        item('preorders', 'calendar-heart', 'Заказы'), item('more', 'dots', 'Ещё')];
+    nav.replaceChildren.apply(nav, items);
+    nav.hidden = false;
+  }
+
   // ---------- экраны ----------
 
   function renderMessage(text) {
@@ -173,10 +213,18 @@
 
   function render() {
     if (!state.data) return;
-    if (state.screen === 'sale') return renderSale();
-    if (state.screen === 'close') return renderClose();
-    if (SCREENS[state.screen]) return SCREENS[state.screen]();
-    renderMain();
+    if (state.screen === 'sale') renderSale();
+    else if (state.screen === 'close') renderClose();
+    else if (SCREENS[state.screen]) SCREENS[state.screen]();
+    else renderMain();
+    renderNav();
+    // Плавное появление — только при переходе на другой экран, не при каждом нажатии.
+    if (app.getAttribute('data-shown') !== state.screen) {
+      app.setAttribute('data-shown', state.screen);
+      app.classList.remove('enter');
+      void app.offsetWidth;
+      app.classList.add('enter');
+    }
   }
 
   function renderMain() {
@@ -185,51 +233,55 @@
     mainButton(null);
     var d = state.data;
     var s = d.shift;
-    var nodes = [];
+    var nodes = [el('div', {}, [
+      el('div', { class: 'hello', text: greeting() + ', ' + firstName(d.me.name) + '!' }),
+      el('div', { class: 'muted', text: s ? 'Смена №' + s.shift_no + ' · с ' + String(s.opened_at).slice(11, 16) + (s.florists.length > 1 ? ' · ' + s.florists.map(firstName).join(' и ') : '') : 'Пусть день будет полон красоты' })
+    ])];
     if (!s) {
       nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Смена не открыта. Откройте её в чате бота кнопкой «Открыть смену».' })]));
+    } else if (!s.on_shift) {
+      nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
     } else {
-      nodes.push(el('div', { class: 'row' }, [
-        el('h1', { class: 'h1', text: 'Смена №' + s.shift_no }),
-        el('div', { class: 'muted', text: s.florists.join(', ') + ' · с ' + String(s.opened_at).slice(11, 16) })
+      var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+      var tomorrow = new Date(Date.now() + 29 * 3600000).toISOString().slice(0, 10);
+      var orders = d.preorders.concat(d.reservations);
+      var soon = orders.filter(function (o) { return o.pickup_date === today || o.pickup_date === tomorrow; }).length;
+      var low = d.catalog.filter(function (c) { return c.stock < c.min; });
+      nodes.push(el('div', { class: 'grid2' }, [
+        el('div', { class: 'card card--accent' }, [icon('chart-line'), el('div', { class: 'muted', text: 'Выручка смены' }),
+          el('div', { class: 'big num', text: money(s.revenue) }), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count })]),
+        s.my_pay ? el('div', { class: 'card' }, [icon('wallet'), el('div', { class: 'muted', text: 'Мой заработок' }),
+          el('div', { class: 'big num', text: money(s.my_pay.total) }),
+          el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) })]) : null,
+        el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer', onclick: function () { openScreen('preorders'); } }, [
+          icon('calendar-heart'), el('div', { class: 'muted', text: 'Предзаказы' }), el('div', { class: 'big num', text: String(orders.length) }),
+          el('div', { class: 'muted', text: soon ? soon + ' на сегодня-завтра' : 'ближайших нет' })]),
+        el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer', onclick: function () { openScreen('stock'); } }, [
+          icon('alert-triangle', 'gold'), el('div', { class: 'muted', text: 'Заканчиваются' }), el('div', { class: 'big num', text: String(low.length) }),
+          el('div', { class: 'muted', text: low.length ? firstName(low[0].name) + ' · ' + low[0].stock : 'всё в порядке' })])
       ]));
-      var cards = [el('div', { class: 'card card--accent' }, [
-        el('div', { class: 'muted', text: 'Выручка смены' }),
-        el('div', { class: 'big num', text: money(s.revenue) }),
-        el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count })
-      ])];
-      if (s.my_pay) {
-        cards.push(el('div', { class: 'card' }, [
-          el('div', { class: 'muted', text: 'Мой заработок' }),
-          el('div', { class: 'big num copper', text: money(s.my_pay.total) }),
-          el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) })
-        ]));
-      }
-      nodes.push(el('div', { class: 'grid2' }, cards));
-      if (s.on_shift) {
-        nodes.push(el('button', { class: 'btn btn--primary btn--action', onclick: function () { state.screen = 'sale'; render(); } }, [
-          el('span', { class: 'big', text: 'Продажа / букет' }),
-          el('span', { text: 'Позиции, цена, скидка, оплата' })
-        ]));
-        var go = function (screen) { return function () { openScreen(screen); }; };
-        var pre = state.data.preorders.length + state.data.reservations.length;
-        nodes.push(el('div', { class: 'grid2' }, [
-          el('button', { class: 'btn', onclick: go('preorders') }, ['Предзаказы' + (pre ? ' (' + pre + ')' : '')]),
-          el('button', { class: 'btn', onclick: go('income') }, ['Приход']),
-          el('button', { class: 'btn', onclick: go('defect') }, ['Брак']),
-          el('button', { class: 'btn', onclick: go('refund') }, ['Возврат']),
-          el('button', { class: 'btn', onclick: go('stock') }, ['Остатки']),
-          el('button', { class: 'btn', onclick: function () { openClose(); } }, ['Закрыть смену'])
-        ]));
-      } else {
-        nodes.push(el('div', { class: 'card card--note' }, [el('div', {
-          text: state.data.me.role === 'owner'
-            ? 'Касса — для флористов смены. Отчёты, сотрудники, расходы месяца и предзаказы — в чате бота.'
-            : 'Вы не работаете в этой смене.' })]));
-      }
+      nodes.push(el('button', { class: 'btn btn--primary btn--action', onclick: function () { state.screen = 'sale'; render(); } }, [
+        icon('shopping-cart'), 'Новая продажа']));
     }
     app.replaceChildren.apply(app, nodes);
   }
+
+  /** «Ещё»: редкие действия смены. */
+  SCREENS_EARLY.more = function () {
+    backButton(false);
+    mainButton(null);
+    var go = function (screen) { return function () { openScreen(screen); }; };
+    app.replaceChildren(
+      el('h1', { class: 'h1', text: 'Ещё' }),
+      el('div', { class: 'grid2' }, [
+        el('button', { class: 'btn btn--tile', onclick: go('income') }, [icon('truck-delivery'), 'Приход']),
+        el('button', { class: 'btn btn--tile', onclick: go('defect') }, [icon('flower-off'), 'Брак']),
+        el('button', { class: 'btn btn--tile', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат']),
+        el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('box'), 'Остатки'])
+      ]),
+      el('button', { class: 'btn btn--primary btn--action', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену']),
+      el('div', { class: 'muted center', text: 'Расход, «Владелица забрала», погашение долга и отмена продажи — кнопками в чате бота.' }));
+  };
 
   function renderSale() {
     backButton(true);
@@ -264,7 +316,7 @@
       var qty = d.cart[c.item_id] || 0;
       var low = c.stock < c.min;
       return el('div', { class: 'tile' + (qty ? ' tile--on' : '') }, [
-        el('div', { class: 'tile__name', text: c.name }),
+        el('div', { class: 'tile__head' }, [catIcon(c.category), el('div', { class: 'tile__name', text: c.name })]),
         el('div', { class: 'tile__meta num' + (low ? ' tile__meta--low' : ''), text: money(c.price) + ' · остаток ' + c.stock }),
         el('div', { class: 'stepper' }, [
           el('button', { 'aria-label': 'Убрать ' + c.name, disabled: qty === 0, onclick: function () { change(c, -1); } }, ['−']),
@@ -640,7 +692,7 @@
     });
   }
 
-  var SCREENS = {};
+  var SCREENS = SCREENS_EARLY;
 
   // ---------- приход ----------
   SCREENS.income = function () {
@@ -784,14 +836,16 @@
     var list = state.data.catalog.filter(function (c) {
       return (cat === 'all' || c.category === cat) && (!q || c.name.toLowerCase().indexOf(q) >= 0);
     }).sort(function (a, b) { return ((b.stock < b.min) - (a.stock < a.min)) || (a.name < b.name ? -1 : 1); });
-    app.replaceChildren(title('Остатки'),
+    app.replaceChildren(title('Склад'),
       el('input', { class: 'search', type: 'search', placeholder: 'Поиск', value: f.q || '', oninput: function (e) { f.q = e.target.value; SCREENS.stock(); var s = app.querySelector('.search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }),
       chips([['all', 'Все']].concat(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; })), cat, function (k) { f.cat = k; render(); }),
       el('div', { class: 'card' }, list.map(function (c) {
         var low = c.stock < c.min;
-        return el('div', { class: 'sum' }, [
-          el('span', { text: c.name + (c.review ? ' · на проверке' : '') }),
-          el('span', { class: 'num' + (low ? ' copper' : ''), text: c.stock + (low ? ' / мин. ' + c.min : '') })
+        return el('div', { class: 'item' }, [
+          catIcon(c.category),
+          el('div', { class: 'item__main' }, [el('div', { style: 'font-weight:600', text: c.name }),
+            el('div', { class: 'muted num', style: 'font-size:13px', text: money(c.price) + ' · ' + c.stock + ' шт' + (c.review ? ' · на проверке' : '') })]),
+          el('span', { class: 'status ' + (low ? 'status--low' : 'status--ok'), text: low ? 'Мало · мин. ' + c.min : 'Есть' })
         ]);
       })));
   };
@@ -925,9 +979,12 @@
 
   function ownerTabs() {
     var cur = state.screen === 'owner_shift' ? 'owner_history' : state.screen;
-    return el('div', { class: 'tabs4' }, OWNER_TABS.map(function (t) {
-      return el('button', { class: 'chip', 'aria-pressed': String(cur === t[0]), onclick: function () { openScreen(t[0]); } }, [t[1]]);
-    }));
+    var t = OWNER_TABS.filter(function (x) { return x[0] === cur; })[0];
+    if (cur === 'owner_today') {
+      return el('div', {}, [el('div', { class: 'hello', text: greeting() + ', ' + firstName(state.data.me.name) + '!' }),
+        el('div', { class: 'muted', text: 'Вот как идут дела в магазине' })]);
+    }
+    return el('h1', { class: 'h1', text: t ? (t[0] === 'owner_period' ? 'Аналитика' : t[1]) : '' });
   }
   /** Отчёт с сервера: текст уже экранирован, разрешаем только <b>. */
   function reportBlock(text) {
@@ -1194,10 +1251,9 @@
   if (tg) {
     tg.ready();
     tg.expand();
-    document.documentElement.setAttribute('data-theme', tg.colorScheme === 'dark' ? 'dark' : 'light');
-    tg.onEvent('themeChanged', function () {
-      document.documentElement.setAttribute('data-theme', tg.colorScheme === 'dark' ? 'dark' : 'light');
-    });
+    // Тема кассы одна — тёмная бирюза с розами; шапку и главную кнопку Telegram красим под неё.
+    try { tg.setHeaderColor('#163940'); tg.setBackgroundColor('#163940'); } catch (e) { /* старые версии Telegram */ }
+    try { tg.MainButton.setParams({ color: '#E0507E', text_color: '#FFFFFF' }); } catch (e2) { /* не важно */ }
   }
   if (!tg || !tg.initData) {
     renderMessage('Откройте кассу из бота: кнопка «Касса» в меню @flora_uchet_bot.');
