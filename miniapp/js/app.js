@@ -453,6 +453,14 @@
     return el('span', { class: 'delta ' + (pct >= 0 ? 'delta--up' : 'delta--down'), text: (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct) + '%' });
   }
 
+  /** Изменение суммы в тенге (для прибыли: проценты от отрицательного числа сбивают с толку). */
+  function deltaMoney(cur, prev) {
+    if (prev === undefined || prev === null) return el('span', { class: 'delta', text: '—' });
+    var diff = cur - prev;
+    if (diff === 0) return el('span', { class: 'delta', text: 'без изменений' });
+    return el('span', { class: 'delta ' + (diff > 0 ? 'delta--up' : 'delta--down'), text: (diff > 0 ? '↑ +' : '↓ −') + money(Math.abs(diff)) });
+  }
+
   /** Кольцевая диаграмма: части с цветами, в центре — итог. */
   function donut(parts, centerTop, centerBottom) {
     var total = parts.reduce(function (a, x) { return a + x.value; }, 0);
@@ -941,8 +949,6 @@
           icon('alert-triangle', 'gold'), el('div', { class: 'muted', text: 'Заканчиваются' }), el('div', { class: 'big num', text: String(low.length) }),
           el('div', { class: 'muted', text: low.length ? firstName(low[0].name) + ' · ' + low[0].stock : 'всё в порядке' })])
       ]));
-      nodes.push(el('button', { class: 'btn btn--primary btn--action', onclick: function () { state.screen = 'sale'; render(); } }, [
-        icon('shopping-cart'), 'Новая продажа']));
       if (state.lastSale) {
         var ls = state.lastSale;
         nodes.push(el('div', { class: 'card' }, [
@@ -966,10 +972,11 @@
       el('div', { class: 'grid2' }, [
         el('button', { class: 'btn btn--tile', onclick: go('income') }, [icon('truck-delivery'), 'Приход']),
         el('button', { class: 'btn btn--tile', onclick: go('defect') }, [icon('flower-off'), 'Брак']),
-        el('button', { class: 'btn btn--tile', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат']),
-        el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('box'), 'Остатки'])
+        el('button', { class: 'btn btn--tile btn--wide', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат'])
       ]),
-      el('button', { class: 'btn btn--primary btn--action', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену']),
+      el('div', { class: 'more-end' }, [
+        el('button', { class: 'btn btn--close', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену'])
+      ]),
       el('div', { class: 'muted center', text: 'Расход, «Владелица забрала», погашение долга и отмена продажи — кнопками в чате бота.' }));
   };
 
@@ -1013,7 +1020,7 @@
       var low = c.stock < c.min;
       var short = state.shortage && state.shortage[c.item_id];
       var badges = [];
-      if ((state.data.hits || []).slice(0, 3).indexOf(c.item_id) >= 0) badges.push(el('span', { class: 'badge badge--hit', text: 'хит' }));
+      if (state.cat !== 'hot' && (state.data.hits || []).slice(0, 3).indexOf(c.item_id) >= 0) badges.push(el('span', { class: 'badge badge--hit', text: 'хит' }));
       if (low) badges.push(el('span', { class: 'badge badge--low', text: 'мало · ' + c.stock }));
       if (c.review) badges.push(el('span', { class: 'badge badge--new', text: 'новое' }));
       return el('div', { class: 'tile' + (qty ? ' tile--on' : '') + (short ? ' tile--short' : '') }, [
@@ -2033,7 +2040,8 @@
           el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), numEl(s.revenue, true),
             el('div', {}, [delta(s.revenue, prev.revenue), el('span', { class: 'muted', style: 'font-size:12px', text: ' к прошлому' })])]),
           el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Прибыль' }), numEl(s.profit, true, s.profit < 0 ? 'copper' : ''),
-            el('div', {}, [delta(s.profit, prev.profit), el('span', { class: 'muted', style: 'font-size:12px', text: ' к прошлому' })])])
+            el('div', {}, [deltaMoney(s.profit, prev.profit), el('span', { class: 'muted', style: 'font-size:12px', text: ' к прошлому' })]),
+            s.profit < 0 ? el('div', { class: 'muted', style: 'font-size:12px;margin-top:4px', text: 'Минус — из-за расходов месяца (аренда и др.)' }) : null])
         ]),
         el('div', { class: 'card' }, [
           el('div', { class: 'legend legend--inline' }, [

@@ -416,3 +416,20 @@ body.on-sale #app { font-size: 14px; }
 body.on-sale #app .h1 { font-size: 24px; }
 body.on-sale #app .card, body.on-sale #app .tile, body.on-sale #app .chip, body.on-sale #app .btn,
 body.on-sale #app .input, body.on-sale #app .search { font-size: 14px; }
+
+/* Быстрее появление экрана: раньше пустой фон держался около секунды. */
+.screen.enter > * { animation: rise .22s ease both; }
+.screen.enter > *:nth-child(n) { animation-delay: 0s; }
+
+/* Читаемость заголовков поверх лепестков. */
+.hello, .h1 { text-shadow: 0 1px 8px rgba(8, 36, 40, .55); }
+.petal { opacity: .4; }
+
+/* «Ещё»: «Закрыть смену» — спокойная кнопка в конце, не главная. */
+.btn--wide { grid-column: 1 / -1; min-height: 64px; flex-direction: row; align-items: center; gap: 10px; }
+.more-end { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, .14); }
+.btn--close { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: transparent; border: 1px solid rgba(255, 179, 179, .5); color: #ffd0d0; font-weight: 600; }
+.btn--close i.ti { color: #ffb3b3; }
+@media (prefers-reduced-motion: reduce) { .screen.enter > * { animation: none; } }
+.btn--wide { justify-content: flex-start; }
