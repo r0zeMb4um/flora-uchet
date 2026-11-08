@@ -245,3 +245,18 @@ test('шаблоны букетов и хиты: сохранить, увиде�
   post(777, 'template_hide', { template_id: saved.data.result.template_id });
   assert.deepEqual(MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.templates, []);
 });
+
+test('аналитика: прибыль по дням сходится со сводкой без расходов месяца; прошлый период; топ позиций', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const anna = (kind, payload) => MiniApi.dispatch(store, 777, { action: 'post', kind, op_id: 'op-an-' + String(++n).padStart(5, '0'), payload }, now);
+  anna('sale', { items: [{ item_id: 'rose', qty: 5 }], price: 6000, payments: [{ method: 'cash', amount: 6000 }] });
+  anna('income', { lines: [{ item_id: 'rose', qty: 10, cost_sum: 6500 }], supplier: 'Опт' });
+  anna('cash_out', { type: 'delivery', amount: 500 });
+  const d = MiniApi.dispatch(store, 1, { action: 'owner_period', from: '2026-11-01', to: '2026-11-07' }, now).data;
+  const sumProfit = d.days.reduce((a, x) => a + x.profit, 0);
+  assert.equal(sumProfit, d.summary.profit - 0, 'без расходов месяца прибыль по дням = прибыль сводки');
+  assert.equal(d.days.find((x) => x.date === '2026-11-07').revenue, 6000);
+  assert.deepEqual(d.top.map((t) => [t.item_id, t.qty]), [['rose', 5]]);
+  assert.deepEqual([d.prev.from, d.prev.to, d.prev.revenue], ['2026-10-25', '2026-10-31', 0]);
+});

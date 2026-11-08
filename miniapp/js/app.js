@@ -315,6 +315,122 @@
       .catch(function (e) { haptic('error'); toast(e && e.message ? e.message : 'Не получилось отправить картинку', true); });
   }
 
+  // ---------- графики ----------
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  /** Плавная линия через точки (Catmull-Rom → кривые Безье). */
+  function smoothPath(pts) {
+    if (!pts.length) return '';
+    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
+    for (var i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      var c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      var c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+    }
+    return d;
+  }
+  function shortMoney(n) {
+    var a = Math.abs(n), sign = n < 0 ? '−' : '';
+    return sign + (a >= 1000000 ? (Math.round(a / 100000) / 10) + 'м' : a >= 1000 ? Math.round(a / 1000) + 'к' : String(a));
+  }
+
+  /** График «Выручка / Прибыль» по дням с подсказкой при касании. */
+  function lineChart(days) {
+    var W = 320, H = 170, L = 34, R = 8, T = 12, B = 22;
+    var rev = days.map(function (x) { return x.revenue; });
+    var pro = days.map(function (x) { return x.profit; });
+    var max = Math.max.apply(null, rev.concat(pro).concat([1]));
+    var min = Math.min.apply(null, pro.concat([0]));
+    var X = function (i) { return L + (days.length > 1 ? i * (W - L - R) / (days.length - 1) : (W - L - R) / 2); };
+    var Y = function (v) { return T + (max - v) * (H - T - B) / (max - min || 1); };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', role: 'img',
+      'aria-label': 'Выручка и прибыль по дням. Всего выручка ' + money(rev.reduce(function (a, v) { return a + v; }, 0)) });
+    var defs = svgEl('defs');
+    var gr = svgEl('linearGradient', { id: 'revFill', x1: 0, x2: 0, y1: 0, y2: 1 });
+    gr.appendChild(svgEl('stop', { offset: 0, 'stop-color': '#f07ca0', 'stop-opacity': .45 }));
+    gr.appendChild(svgEl('stop', { offset: 1, 'stop-color': '#f07ca0', 'stop-opacity': 0 }));
+    defs.appendChild(gr); svg.appendChild(defs);
+    [max, (max + min) / 2, min].forEach(function (v) {
+      svg.appendChild(svgEl('line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: 'rgba(255,255,255,.15)', 'stroke-dasharray': '3 4' }));
+      var t = svgEl('text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
+      t.textContent = shortMoney(Math.round(v)); svg.appendChild(t);
+    });
+    var rp = rev.map(function (v, i) { return [X(i), Y(v)]; });
+    var pp = pro.map(function (v, i) { return [X(i), Y(v)]; });
+    svg.appendChild(svgEl('path', { d: smoothPath(rp) + ' L' + X(days.length - 1) + ' ' + Y(min) + ' L' + X(0) + ' ' + Y(min) + 'Z', fill: 'url(#revFill)' }));
+    var line1 = svgEl('path', { d: smoothPath(rp), fill: 'none', stroke: '#f07ca0', 'stroke-width': 2.6, 'stroke-linecap': 'round', class: 'draw' });
+    var line2 = svgEl('path', { d: smoothPath(pp), fill: 'none', stroke: '#7fd0e0', 'stroke-width': 2, 'stroke-linecap': 'round', class: 'draw' });
+    svg.appendChild(line1); svg.appendChild(line2);
+    var step = Math.max(1, Math.ceil(days.length / 7));
+    days.forEach(function (x, i) {
+      if (i % step && i !== days.length - 1) return;
+      var t = svgEl('text', { x: X(i), y: H - 6, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
+      t.textContent = x.date.slice(8, 10) + '.' + x.date.slice(5, 7); svg.appendChild(t);
+    });
+    var guide = svgEl('line', { y1: T, y2: H - B, stroke: 'rgba(255,255,255,.5)', 'stroke-width': 1, visibility: 'hidden' });
+    var dot1 = svgEl('circle', { r: 5, fill: '#fff', stroke: '#f07ca0', 'stroke-width': 2.5, visibility: 'hidden' });
+    var dot2 = svgEl('circle', { r: 4, fill: '#fff', stroke: '#7fd0e0', 'stroke-width': 2, visibility: 'hidden' });
+    svg.appendChild(guide); svg.appendChild(dot1); svg.appendChild(dot2);
+    var tip = el('div', { class: 'tip', hidden: true });
+    var box = el('div', { class: 'chart' }, [svg, tip]);
+    function show(clientX) {
+      var rect = svg.getBoundingClientRect();
+      var x = (clientX - rect.left) * W / rect.width;
+      var i = Math.max(0, Math.min(days.length - 1, Math.round((x - L) / ((W - L - R) / Math.max(1, days.length - 1)))));
+      [guide].forEach(function (g) { g.setAttribute('x1', X(i)); g.setAttribute('x2', X(i)); g.setAttribute('visibility', 'visible'); });
+      dot1.setAttribute('cx', X(i)); dot1.setAttribute('cy', Y(rev[i])); dot1.setAttribute('visibility', 'visible');
+      dot2.setAttribute('cx', X(i)); dot2.setAttribute('cy', Y(pro[i])); dot2.setAttribute('visibility', 'visible');
+      tip.replaceChildren(el('div', { class: 'muted', text: days[i].date.split('-').reverse().join('.') }),
+        el('div', { class: 'num' }, [el('span', { style: 'color:#f07ca0', text: '● ' }), money(rev[i])]),
+        el('div', { class: 'num' }, [el('span', { style: 'color:#7fd0e0', text: '● ' }), money(pro[i])]));
+      tip.hidden = false;
+      var px = X(i) / W * rect.width;
+      tip.style.left = Math.max(0, Math.min(rect.width - 130, px - 65)) + 'px';
+      haptic('light');
+    }
+    svg.addEventListener('pointerdown', function (e) { show(e.clientX); });
+    svg.addEventListener('pointermove', function (e) { if (e.buttons || e.pointerType === 'mouse') show(e.clientX); });
+    return box;
+  }
+
+  /** Сравнение с прошлым периодом: «↑ 12%», «↓ 5%», «—». */
+  function delta(cur, prev) {
+    if (!prev) return el('span', { class: 'delta', text: cur ? 'новое' : '—' });
+    var pct = Math.round((cur - prev) / Math.abs(prev) * 100);
+    return el('span', { class: 'delta ' + (pct >= 0 ? 'delta--up' : 'delta--down'), text: (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct) + '%' });
+  }
+
+  /** Кольцевая диаграмма: части с цветами, в центре — итог. */
+  function donut(parts, centerTop, centerBottom) {
+    var total = parts.reduce(function (a, x) { return a + x.value; }, 0);
+    var size = 132, rr = 52, C = 2 * Math.PI * rr;
+    var svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, width: size, height: size, role: 'img',
+      'aria-label': parts.map(function (x) { return x.label + ' ' + money(x.value); }).join(', ') });
+    svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: 'rgba(255,255,255,.12)', 'stroke-width': 16 }));
+    var off = 0;
+    parts.forEach(function (x) {
+      if (!x.value || !total) return;
+      var len = x.value / total * C;
+      svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: x.color, 'stroke-width': 16,
+        'stroke-dasharray': Math.max(0, len - 2) + ' ' + (C - Math.max(0, len - 2)), 'stroke-dashoffset': -off, transform: 'rotate(-90 66 66)', 'stroke-linecap': 'butt', class: 'ring' }));
+      off += len;
+    });
+    var t1 = svgEl('text', { x: 66, y: 64, 'text-anchor': 'middle', fill: '#fff', 'font-size': 17, 'font-weight': 700 }); t1.textContent = centerTop;
+    var t2 = svgEl('text', { x: 66, y: 82, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 11 }); t2.textContent = centerBottom;
+    svg.appendChild(t1); svg.appendChild(t2);
+    var legend = el('div', { class: 'legend' }, parts.filter(function (x) { return x.value; }).map(function (x) {
+      return el('div', { class: 'legend__row' }, [el('span', { class: 'legend__dot', style: 'background:' + x.color }), el('span', { text: x.label }),
+        el('b', { class: 'num', text: money(x.value) + (total ? ' · ' + Math.round(x.value / total * 100) + '%' : '') })]);
+    }));
+    return el('div', { class: 'donut' }, [svg, legend]);
+  }
+
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -1219,11 +1335,38 @@
     backButton(true);
     mainButton('Новый предзаказ', !state.sending, function () { openScreen('preorder_new'); });
     var d = state.data;
+    var f = state.form || {};
     var nodes = [title('Предзаказы', 'По дате выдачи')];
+    // Календарь на 14 дней: точки — сколько выдач в день; касание — показать только этот день.
+    var all = d.preorders.map(function (p) { return p.pickup_date; }).concat(d.reservations.map(function (r) { return r.pickup_date; }));
+    var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+    var overdue = all.filter(function (x) { return x < today; }).length;
+    var WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+    var cells = [];
+    for (var i = 0; i < 14; i++) {
+      var day = new Date(Date.parse(today + 'T00:00:00Z') + i * 86400000);
+      var iso = day.toISOString().slice(0, 10);
+      var n = all.filter(function (x) { return x === iso; }).length;
+      (function (iso, n, wd, num) {
+        cells.push(el('button', { class: 'cal__day' + (f.day === iso ? ' cal__day--on' : '') + (i === 0 ? ' cal__day--today' : ''), 'aria-label': iso + ': выдач ' + n,
+          onclick: function () { f.day = f.day === iso ? null : iso; render(); } }, [
+          el('span', { class: 'cal__wd', text: wd }), el('span', { class: 'cal__num', text: num }),
+          el('span', { class: 'cal__dots' }, n ? Array.from({ length: Math.min(n, 3) }, function () { return el('i'); }).concat(n > 3 ? [el('em', { text: '+' + (n - 3) })] : []) : [])
+        ]));
+      })(iso, n, WD[day.getUTCDay()], String(day.getUTCDate()));
+    }
+    if (all.length) {
+      nodes.push(el('div', { class: 'card' }, [
+        el('div', { class: 'cal' }, cells),
+        overdue ? el('div', { class: 'error', text: 'Просрочено выдач: ' + overdue + ' — проверьте, забрали ли заказ' }) : null,
+        f.day ? el('button', { class: 'chip', onclick: function () { f.day = null; render(); } }, ['Показать все дни']) : null
+      ]));
+    }
+    var onDay = function (x) { return !f.day || x.pickup_date === f.day; };
     if (!d.preorders.length && !d.reservations.length) {
       nodes.push(emptyState('Предзаказов пока нет', 'Когда клиент закажет букет заранее, он появится здесь — по дате выдачи.'));
     }
-    d.preorders.forEach(function (p) {
+    d.preorders.filter(onDay).forEach(function (p) {
       nodes.push(el('div', { class: 'card' }, [
         el('div', { class: 'sum' }, [el('b', { text: dateRu(p.pickup_date) + ' · ' + p.customer }), el('span', { class: 'num', text: money(p.total) })]),
         el('div', { class: 'muted num', text: 'аванс ' + money(p.paid) + ' · к доплате ' + money(p.unpaid) + ' · ' + (p.assembly_status === 'assembled' ? 'собран' : 'не собран') }),
@@ -1232,7 +1375,7 @@
           : el('button', { class: 'btn btn--primary', onclick: function () { openScreen('pickup', { pre: p, method: 'cash' }); } }, ['Выдать'])
       ]));
     });
-    d.reservations.forEach(function (r) {
+    d.reservations.filter(onDay).forEach(function (r) {
       nodes.push(el('div', { class: 'card card--note' }, [
         el('div', { class: 'sum' }, [el('b', { text: dateRu(r.pickup_date) + ' · ' + r.customer + ' · бронь' }), el('span', { class: 'num', text: money(r.total) })]),
         el('div', { class: 'muted', text: 'Без аванса — в выручку войдёт, когда внесут первую оплату.' }),
@@ -1402,11 +1545,15 @@
           el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'В кассе по расчёту' }), numEl(r.calc_cash, true),
             el('div', { class: 'muted num', text: 'безнал ' + money(r.card_total) })])
         ]));
+        if (r.revenue) {
+          nodes.push(el('div', { class: 'card' }, [donut([
+            { label: 'Наличными', value: r.sales_cash, color: '#f07ca0' },
+            { label: 'Безнал', value: r.sales_card, color: '#7fd0e0' },
+            { label: 'В долг', value: r.sales_debt, color: '#ffd27a' },
+            { label: 'Предзаказы к доплате', value: r.preorder_unpaid, color: '#c9b6ff' }
+          ], shortMoney(r.revenue) + ' ₸', 'выручка')]));
+        }
         nodes.push(el('div', { class: 'card' }, [
-          kv('Наличными', money(r.sales_cash)),
-          kv('Безнал', money(r.sales_card)),
-          r.sales_debt ? kv('В долг', money(r.sales_debt)) : null,
-          r.preorder_unpaid ? kv('Предзаказы к доплате', money(r.preorder_unpaid)) : null,
           r.discounts ? kv('Скидки', money(r.discounts)) : null,
           kv('Расходы (доставка + прочее)', money(r.delivery + r.other)),
           r.withdrawal ? kv('Изъято', money(r.withdrawal)) : null,
@@ -1515,28 +1662,32 @@
     }
     ownerLoad('owner_period', { from: range[0], to: range[1] }, function (d) {
       var s = d.summary;
-      var max = Math.max.apply(null, d.days.map(function (x) { return x.revenue; }).concat([1]));
-      var bars = el('div', { style: 'display:flex;align-items:flex-end;gap:2px;height:120px', role: 'img',
-        'aria-label': 'Выручка по дням: ' + d.days.filter(function (x) { return x.revenue; }).map(function (x) { return x.date.slice(8, 10) + '.' + x.date.slice(5, 7) + ' — ' + x.revenue; }).join(', ') },
-        d.days.map(function (x) {
-          return el('div', { title: x.date + ': ' + money(x.revenue),
-            style: 'flex:1;min-width:2px;border-radius:3px 3px 0 0;background:var(--primary);height:' + Math.max(x.revenue ? 4 : 1, Math.round(x.revenue / max * 120)) + 'px;opacity:' + (x.revenue ? 1 : 0.25) });
-        }));
+      var prev = d.prev || {};
       var staff = d.names.staff || {};
       var ownerItems = Object.keys(s.owner_by_item).map(function (k) { return kv(k, money(s.owner_by_item[k])); });
       app.replaceChildren.apply(app, head.concat([
         el('div', { class: 'muted', text: range[0].split('-').reverse().join('.') + ' — ' + range[1].split('-').reverse().join('.') }),
         el('div', { class: 'grid2' }, [
-          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), el('div', { class: 'big num', text: money(s.revenue) }),
-            el('div', { class: 'muted', text: 'смен ' + s.shifts + ' · чеков ' + s.receipts })]),
-          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Прибыль' }), el('div', { class: 'big num ' + (s.profit < 0 ? 'copper' : ''), text: money(s.profit) }),
-            el('div', { class: 'muted num', text: 'средний чек ' + money(s.avg_check) })])
+          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), numEl(s.revenue, true),
+            el('div', {}, [delta(s.revenue, prev.revenue), el('span', { class: 'muted', style: 'font-size:12px', text: ' к прошлому' })])]),
+          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Прибыль' }), numEl(s.profit, true, s.profit < 0 ? 'copper' : ''),
+            el('div', {}, [delta(s.profit, prev.profit), el('span', { class: 'muted', style: 'font-size:12px', text: ' к прошлому' })])])
         ]),
-        el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Выручка по дням' }), bars,
-          el('div', { class: 'sum muted', style: 'font-size:12px' }, [
-            el('span', { text: d.days[0].date.slice(8, 10) + '.' + d.days[0].date.slice(5, 7) }),
-            el('span', { text: 'макс. ' + money(max) }),
-            el('span', { text: d.days[d.days.length - 1].date.slice(8, 10) + '.' + d.days[d.days.length - 1].date.slice(5, 7) })])]),
+        el('div', { class: 'card' }, [
+          el('div', { class: 'legend legend--inline' }, [
+            el('div', { class: 'legend__row' }, [el('span', { class: 'legend__dot', style: 'background:#f07ca0' }), el('span', { text: 'Выручка' })]),
+            el('div', { class: 'legend__row' }, [el('span', { class: 'legend__dot', style: 'background:#7fd0e0' }), el('span', { text: 'Прибыль дня' })])
+          ]),
+          lineChart(d.days),
+          el('div', { class: 'muted', style: 'font-size:12px', text: 'Коснитесь графика, чтобы увидеть день. Прибыль дня — без расходов месяца (аренда и др.). Смен ' + s.shifts + ' · чеков ' + s.receipts + ' · средний чек ' + money(s.avg_check) + '.' })
+        ]),
+        d.top && d.top.length ? el('div', { class: 'card' }, [el('div', { class: 'script', style: 'font-size:24px', text: 'Топ позиций' })].concat(d.top.map(function (t) {
+          var maxQ = d.top[0].qty || 1;
+          return el('div', { class: 'item' }, [itemArt(t), el('div', { class: 'item__main' }, [
+            el('div', { style: 'font-weight:600', text: t.name }),
+            el('div', { class: 'bar' }, [el('span', { style: 'width:' + Math.round(t.qty / maxQ * 100) + '%' })])
+          ]), el('b', { class: 'num', text: t.qty + ' шт' })]);
+        }))) : null,
         el('div', { class: 'card' }, [
           kv('Получено наличными', money(s.cash)),
           kv('Получено безналом', money(s.card)),

@@ -326,3 +326,41 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 /* Рисунки цветов вместо значков. */
 .ico--art { background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .25); padding: 0; overflow: hidden; }
 .ico--art img { width: 34px; height: 34px; display: block; }
+
+/* Графики. */
+.chart { position: relative; }
+.chart svg { display: block; touch-action: pan-y; }
+.draw { stroke-dasharray: 1200; stroke-dashoffset: 1200; animation: draw 1.4s ease forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.tip { position: absolute; top: 0; width: 130px; padding: 8px 10px; border-radius: 12px; font-size: 13px; font-weight: 600;
+  background: rgba(255, 255, 255, .95); color: #2a1f24; box-shadow: 0 8px 20px rgba(0, 0, 0, .25); pointer-events: none; }
+.tip .muted { color: #6b5b61; text-shadow: none; }
+.delta { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .16); }
+.delta--up { color: var(--ok); }
+.delta--down { color: #ffb3b3; }
+.card--accent .delta--up { color: #fff; background: rgba(255, 255, 255, .25); }
+.legend { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; font-size: 13px; }
+.legend--inline { flex-direction: row; gap: 14px; }
+.legend__row { display: flex; align-items: center; gap: 6px; }
+.legend__row b { margin-left: auto; font-weight: 600; }
+.legend__dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.donut { display: flex; align-items: center; gap: 14px; }
+.donut svg { flex: none; }
+.ring { animation: ring .9s ease both; }
+@keyframes ring { from { stroke-dasharray: 0 999; } }
+.bar { height: 6px; border-radius: 6px; background: rgba(255, 255, 255, .12); margin-top: 6px; overflow: hidden; }
+.bar span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--rose), var(--rose-2)); }
+
+/* Календарь предзаказов. */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal__day { border: 1px solid transparent; background: rgba(255, 255, 255, .08); color: #fff; border-radius: 12px; padding: 6px 0 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px; font: inherit; cursor: pointer; min-height: 58px; }
+.cal__day--today { border-color: var(--rose-soft); }
+.cal__day--on { background: linear-gradient(135deg, var(--rose), var(--rose-2)); }
+.cal__wd { font-size: 11px; opacity: .8; }
+.cal__num { font-size: 17px; font-weight: 700; }
+.cal__dots { display: flex; gap: 2px; align-items: center; min-height: 8px; }
+.cal__dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--rose-2); }
+.cal__day--on .cal__dots i { background: #fff; }
+.cal__dots em { font-size: 9px; font-style: normal; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .draw, .ring { animation: none; stroke-dashoffset: 0; } }

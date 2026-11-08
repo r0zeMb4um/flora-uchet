@@ -181,19 +181,43 @@ var MiniApi = (function () {
       text: typeof Reports !== 'undefined' ? Reports.shiftText(rep, names(view)) : '' };
   }
 
+  /**
+   * Сводка за период + ряды по дням (выручка и прибыль дня), прошлый период той же длины для сравнения, топ позиций.
+   * Прибыль дня = выручка − возвраты − закупки − ЗП − доставки − прочее (расходы месяца владелицы в дни не делятся).
+   */
   function ownerPeriod(store, staff, now, from, to) {
     var view = Ops.makeView(store, ctxOf(staff, now));
     var s = Summary.period(view, from, to);
-    var byDay = {};
-    view.rows('shifts').filter(function (x) { return x.shift_date >= from && x.shift_date <= to; }).forEach(function (x) {
-      var rev = Calc.shiftRevenue(view.rows('receipts').filter(function (r) { return r.shift_id === x.shift_id; })).revenue;
-      byDay[x.shift_date] = (byDay[x.shift_date] || 0) + rev;
-    });
     var days = [];
+    var byDay = {};
     for (var d = from; d <= to && days.length < 92; d = new Date(Date.parse(d + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)) {
-      days.push({ date: d, revenue: byDay[d] || 0 });
+      byDay[d] = { date: d, revenue: 0, profit: 0 };
+      days.push(byDay[d]);
     }
-    return { summary: s, days: days, names: names(view) };
+    var ids = {};
+    view.rows('shifts').filter(function (x) { return x.shift_date >= from && x.shift_date <= to; }).forEach(function (x) {
+      ids[x.shift_id] = x.shift_date;
+      var r = Ops.shiftReport(view, x.shift_id);
+      var pay = r.payroll.reduce(function (a, p) { return a + p.total; }, 0);
+      var day = byDay[x.shift_date];
+      if (!day) return;
+      day.revenue += r.revenue;
+      day.profit += r.revenue - r.refunds_cash - r.refunds_card - pay - r.delivery - r.other;
+    });
+    var sold = {};
+    view.rows('stock_moves').forEach(function (m) {
+      if (m.type === 'income' && ids[m.shift_id] && byDay[ids[m.shift_id]]) byDay[ids[m.shift_id]].profit -= (m.cost_sum || 0);
+      if (m.type === 'sale' && ids[m.shift_id]) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
+    });
+    var top = Object.keys(sold).filter(function (id) { return sold[id] > 0; }).sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 5)
+      .map(function (id) { var it = view.item(id) || {}; return { item_id: id, name: it.name || id, category: it.category || '', qty: sold[id] }; });
+    // Прошлый период той же длины — для «↑12%».
+    var len = days.length;
+    var pTo = new Date(Date.parse(from + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+    var pFrom = new Date(Date.parse(from + 'T00:00:00Z') - len * 86400000).toISOString().slice(0, 10);
+    var prev = Summary.period(view, pFrom, pTo);
+    return { summary: s, days: days, top: top, prev: { from: pFrom, to: pTo, revenue: prev.revenue, profit: prev.profit, receipts: prev.receipts },
+      names: names(view) };
   }
 
   function ownerCustomers(store, staff, now) {
