@@ -288,6 +288,10 @@ var Ops = (function () {
   function saleLike(type) {
     return function (view, p, plan) {
       var shift = requireShift(view, plan);
+      // Продажа из очереди без связи могла оформляться в другой смене: номер смены присылает касса.
+      if (p.shift_no !== undefined && Number(p.shift_no) !== shift.shift_no) {
+        throw opsError('SHIFT_CHANGED', 'Продажа оформлялась в смене №' + p.shift_no + ', а сейчас открыта смена №' + shift.shift_no + ' — она не проведена. Оформите её заново.');
+      }
       var items = list(p.items, 'позиции');
       var r = C.receiptTotal(p.price, p.discount);
       var pays = payments(p.payments);

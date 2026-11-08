@@ -393,3 +393,14 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 .confirm__why { color: var(--gold); font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
 .tpl--again { border-style: dashed; }
 .tpl--again i.ti { font-size: 26px; color: var(--rose-soft); }
+
+/* Полоска связи: нет сети / отправляем / не проведено. */
+.net { position: sticky; top: 53px; z-index: 3; padding: 9px 16px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, .15); }
+.net--off { background: rgba(255, 210, 122, .92); color: #3a2a06; }
+.net--sync { background: rgba(127, 208, 224, .9); color: #06303a; }
+.net--bad { background: rgba(194, 51, 95, .95); color: #fff; }
+/* Сообщение об ошибке прямо у поля. */
+.fielderr { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 12px; align-items: flex-start;
+  background: rgba(255, 154, 154, .14); border: 1px solid rgba(255, 154, 154, .5); }
+.fielderr .error { font-size: 14px; font-weight: 600; }

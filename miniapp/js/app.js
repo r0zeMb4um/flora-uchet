@@ -18,10 +18,13 @@
   var DRAFT_KEY = 'flora.sale.draft.v1';
   var CATS = { flowers: 'Цветы', greens: 'Зелень', toys: 'Игрушки', baskets: 'Корзины', packaging: 'Упаковка' };
   var LAST_KEY = 'flora.last.v1';
+  var QUEUE_KEY = 'flora.queue.v1'; // продажи, ещё не принятые сервером
+  var CACHE_KEY = 'flora.cache.v1'; // последние данные кассы (каталог, остатки) — касса открывается мгновенно
   var LARGE_SUM = 50000; // с этой суммы «Провести» просит подтвердить
   var CAT_ICON = { flowers: 'flower', greens: 'leaf', toys: 'gift', baskets: 'basket', packaging: 'package' };
 
-  var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false };
+  var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false,
+    offline: typeof navigator !== 'undefined' && navigator.onLine === false, fromCache: false, fieldError: null };
   var SCREENS_EARLY = {};
 
   // ---------- общие ----------
@@ -184,261 +187,22 @@
     return el('div', { class: 'field' }, [el('label', { text: label }), btn]);
   }
 
-  /** Экран «Проведено» на секунду: галочка, сумма, способ оплаты. */
-  function showDone(amount, line, already) {
+  /** Экран «Принято / Проведено» на секунду. Возвращает элементы, чтобы дописать «Проведено», когда сервер подтвердит. */
+  function showDone(amount, line, already, pending) {
+    var title = el('div', { class: 'done__title script', text: already ? 'Уже было проведено' : pending ? 'Принято' : 'Проведено' });
+    var note = el('div', { class: 'muted', text: pending ? 'отправляем…' : '' });
     var box = el('div', { class: 'done', role: 'status' }, [
       el('div', { class: 'done__check' }, [icon('check')]),
-      el('div', { class: 'done__title script', text: already ? 'Уже было проведено' : 'Проведено' }),
+      title,
       el('div', { class: 'done__sum num', text: money(amount) }),
-      line ? el('div', { class: 'muted', text: line }) : null
+      line ? el('div', { class: 'muted', text: line }) : null,
+      note
     ]);
     box.onclick = function () { box.remove(); };
     document.body.appendChild(box);
-    setTimeout(function () { box.classList.add('done--out'); }, 1100);
-    setTimeout(function () { box.remove(); }, 1400);
-  }
-
-  // ---------- картинки для пересылки: чек клиенту и карточка дня ----------
-
-  function loadImg(src) {
-    return new Promise(function (ok, fail) { var i = new Image(); i.onload = function () { ok(i); }; i.onerror = fail; i.src = src; });
-  }
-  function rrect(g, x, y, w, h, r) {
-    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-  }
-  var SCRIPT = 'italic 600 {px}px "Cormorant Garamond", Georgia, serif';
-  var SANS = '{w} {px}px Manrope, Arial, sans-serif';
-  function font(tpl, px, w) { return tpl.replace('{px}', px).replace('{w}', w || 600); }
-
-  /** Фон и шапка в фирменном стиле. Возвращает canvas и контекст. */
-  function brandCanvas(h, shopName, logo) {
-    var c = document.createElement('canvas');
-    c.width = 1080; c.height = h;
-    var g = c.getContext('2d');
-    var bg = g.createLinearGradient(0, 0, 1080, h);
-    bg.addColorStop(0, '#163940'); bg.addColorStop(.55, '#24545d'); bg.addColorStop(1, '#4f8790');
-    g.fillStyle = bg; g.fillRect(0, 0, 1080, h);
-    [[960, 140, 360, 'rgba(247,168,196,.95)'], [60, h - 80, 460, 'rgba(242,182,201,.9)'], [1040, h * 0.62, 220, 'rgba(252,214,226,.7)']].forEach(function (b) {
-      var rg = g.createRadialGradient(b[0], b[1], 0, b[0], b[1], b[2]);
-      rg.addColorStop(0, b[3]); rg.addColorStop(.45, 'rgba(224,80,126,.45)'); rg.addColorStop(1, 'rgba(224,80,126,0)');
-      g.fillStyle = rg; g.fillRect(0, 0, 1080, h);
-    });
-    g.drawImage(logo, 64, 52, 132, 132);
-    g.fillStyle = '#fff'; g.font = font(SCRIPT, 76); g.textBaseline = 'alphabetic';
-    g.fillText(shopName, 214, 132);
-    g.font = font(SANS, 22, 600); g.globalAlpha = .85;
-    g.fillText('Ц В Е Т О Ч Н А Я   К А С С А', 218, 172); g.globalAlpha = 1;
-    return { c: c, g: g };
-  }
-  function glass(g, x, y, w, h) {
-    rrect(g, x, y, w, h, 44);
-    g.fillStyle = 'rgba(18,48,54,.38)'; g.fill();
-    g.fillStyle = 'rgba(255,255,255,.14)'; g.fill();
-    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.stroke();
-    g.fillStyle = '#fff'; // текст после стекла — снова белый
-  }
-  function fit(g, text, maxW) {
-    var t = String(text);
-    while (t.length > 3 && g.measureText(t).width > maxW) t = t.slice(0, -2);
-    return t === String(text) ? t : t.slice(0, -1) + '…';
-  }
-  function ready() {
-    var f = document.fonts;
-    return Promise.all([f ? f.load(font(SCRIPT, 60)) : 0, f ? f.load(font(SANS, 40, 700)) : 0, f ? f.load(font(SANS, 30, 500)) : 0,
-      loadImg('img/ranunculus.svg')]).then(function (x) { return x[3]; });
-  }
-
-  /** Чек для покупателя (не фискальный). */
-  function drawReceipt(sale) {
-    return ready().then(function (logo) {
-      var lines = sale.items.slice(0, 8);
-      var h = 1350;
-      var k = brandCanvas(h, sale.shop, logo);
-      var g = k.g;
-      glass(g, 64, 230, 952, 1000);
-      g.fillStyle = '#fff'; g.font = font(SCRIPT, 72); g.fillText('Спасибо за покупку!', 112, 340);
-      g.font = font(SANS, 30, 500); g.globalAlpha = .85; g.fillText(sale.when + (sale.type === 'bouquet' ? ' · букет' : ''), 116, 392); g.globalAlpha = 1;
-      var y = 470;
-      g.font = font(SANS, 36, 600);
-      lines.forEach(function (l) {
-        g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(fit(g, l.name, 720), 116, y);
-        g.textAlign = 'right'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText('× ' + l.qty, 964, y);
-        y += 58;
-      });
-      if (sale.items.length > lines.length) { g.textAlign = 'left'; g.fillText('и ещё ' + (sale.items.length - lines.length) + ' поз.', 116, y); y += 58; }
-      g.textAlign = 'left';
-      g.strokeStyle = 'rgba(255,255,255,.3)'; g.setLineDash([10, 10]); g.beginPath(); g.moveTo(116, y); g.lineTo(964, y); g.stroke(); g.setLineDash([]);
-      y += 64;
-      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
-      if (sale.discount) { g.fillText('Скидка', 116, y); g.textAlign = 'right'; g.fillText('− ' + money(sale.discount), 964, y); g.textAlign = 'left'; y += 56; }
-      g.fillStyle = '#fff'; g.font = font(SANS, 40, 700); g.fillText('Итого', 116, y + 40);
-      g.textAlign = 'right'; g.font = font(SANS, 92, 700); g.fillText(money(sale.total), 964, y + 50); g.textAlign = 'left';
-      y += 120;
-      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
-      g.fillText('Оплата: ' + sale.how, 116, y);
-      g.font = font(SCRIPT, 56); g.fillStyle = '#fcd6e2'; g.fillText('Ждём вас снова!', 116, 1150);
-      g.font = font(SANS, 22, 500); g.fillStyle = 'rgba(255,255,255,.7)'; g.fillText('Это не кассовый чек — фискальный чек выдаёт касса магазина.', 116, 1300);
-      g.drawImage(logo, 840, 1040, 150, 150);
-      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
-    });
-  }
-
-  /** Карточка дня для владелицы. */
-  function drawDayCard(day, shop) {
-    return Promise.all([ready(), day.top_item ? loadImg('img/flowers/' + artName(day.top_item) + '.svg').catch(function () { return null; }) : null]).then(function (x) {
-      var logo = x[0], topArt = x[1];
-      var k = brandCanvas(1350, shop, logo);
-      var g = k.g;
-      var d = day.date.split('-').reverse().join('.');
-      g.fillStyle = '#fff'; g.font = font(SCRIPT, 84); g.fillText('Вчера, ' + d.slice(0, 5), 96, 330);
-      glass(g, 64, 380, 952, 330);
-      g.font = font(SANS, 34, 600); g.globalAlpha = .85; g.fillText('Выручка', 116, 460); g.globalAlpha = 1;
-      g.font = font(SANS, 132, 700); g.fillText(money(day.revenue), 112, 600);
-      g.font = font(SANS, 32, 500); g.globalAlpha = .85; g.fillText('чеков ' + day.receipts + ' · средний чек ' + money(day.avg_check), 116, 670); g.globalAlpha = 1;
-      glass(g, 64, 740, 952, 150);
-      var clean = day.all_closed && day.cash_diff === 0;
-      g.font = font(SANS, 44, 700); g.fillStyle = clean ? '#9fe8c0' : '#ffd27a';
-      g.fillText(!day.all_closed ? 'Смена не закрыта' : clean ? '✓ Касса сошлась до тенге' : 'Расхождение кассы ' + money(day.cash_diff), 116, 832);
-      if (day.top_item) {
-        glass(g, 64, 920, 952, 230);
-        if (topArt) g.drawImage(topArt, 100, 950, 170, 170);
-        g.fillStyle = '#fff'; g.font = font(SANS, 30, 600); g.globalAlpha = .85; g.fillText('Лучшая позиция дня', 300, 1010); g.globalAlpha = 1;
-        g.font = font(SCRIPT, 64); g.fillText(fit(g, day.top_item.name, 680), 300, 1080);
-        g.font = font(SANS, 30, 500); g.fillText(day.top_item.qty + ' шт', 300, 1126);
-      }
-      g.font = font(SCRIPT, 54); g.fillStyle = '#fcd6e2'; g.fillText('Хорошего дня!', 96, 1260);
-      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
-    });
-  }
-  function artName(c) {
-    var n = String(c.name || '').toLowerCase();
-    if (c.category === 'greens') return 'eucalyptus';
-    return /роз/.test(n) ? 'rose' : /тюльпан/.test(n) ? 'tulip' : /пион/.test(n) ? 'peony' : 'ranunculus';
-  }
-
-  /** Нарисовать и прислать себе в чат с ботом. */
-  function shareImage(draw, caption, okText) {
-    toast('Рисуем картинку…');
-    return draw().then(function (b64) { return api({ action: 'send_image', image: b64, caption: caption }); })
-      .then(function () { haptic('success'); toast(okText); })
-      .catch(function (e) { haptic('error'); toast(e && e.message ? e.message : 'Не получилось отправить картинку', true); });
-  }
-
-  // ---------- графики ----------
-
-  var SVGNS = 'http://www.w3.org/2000/svg';
-  function svgEl(tag, attrs) {
-    var e = document.createElementNS(SVGNS, tag);
-    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
-    return e;
-  }
-  /** Плавная линия через точки (Catmull-Rom → кривые Безье). */
-  function smoothPath(pts) {
-    if (!pts.length) return '';
-    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
-    for (var i = 0; i < pts.length - 1; i++) {
-      var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
-      var c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-      var c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
-      d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
-    }
-    return d;
-  }
-  function shortMoney(n) {
-    var a = Math.abs(n), sign = n < 0 ? '−' : '';
-    return sign + (a >= 1000000 ? (Math.round(a / 100000) / 10) + 'м' : a >= 1000 ? Math.round(a / 1000) + 'к' : String(a));
-  }
-
-  /** График «Выручка / Прибыль» по дням с подсказкой при касании. */
-  function lineChart(days) {
-    var W = 320, H = 170, L = 34, R = 8, T = 12, B = 22;
-    var rev = days.map(function (x) { return x.revenue; });
-    var pro = days.map(function (x) { return x.profit; });
-    var max = Math.max.apply(null, rev.concat(pro).concat([1]));
-    var min = Math.min.apply(null, pro.concat([0]));
-    var X = function (i) { return L + (days.length > 1 ? i * (W - L - R) / (days.length - 1) : (W - L - R) / 2); };
-    var Y = function (v) { return T + (max - v) * (H - T - B) / (max - min || 1); };
-    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', role: 'img',
-      'aria-label': 'Выручка и прибыль по дням. Всего выручка ' + money(rev.reduce(function (a, v) { return a + v; }, 0)) });
-    var defs = svgEl('defs');
-    var gr = svgEl('linearGradient', { id: 'revFill', x1: 0, x2: 0, y1: 0, y2: 1 });
-    gr.appendChild(svgEl('stop', { offset: 0, 'stop-color': '#f07ca0', 'stop-opacity': .45 }));
-    gr.appendChild(svgEl('stop', { offset: 1, 'stop-color': '#f07ca0', 'stop-opacity': 0 }));
-    defs.appendChild(gr); svg.appendChild(defs);
-    [max, (max + min) / 2, min].forEach(function (v) {
-      svg.appendChild(svgEl('line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: 'rgba(255,255,255,.15)', 'stroke-dasharray': '3 4' }));
-      var t = svgEl('text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
-      t.textContent = shortMoney(Math.round(v)); svg.appendChild(t);
-    });
-    var rp = rev.map(function (v, i) { return [X(i), Y(v)]; });
-    var pp = pro.map(function (v, i) { return [X(i), Y(v)]; });
-    svg.appendChild(svgEl('path', { d: smoothPath(rp) + ' L' + X(days.length - 1) + ' ' + Y(min) + ' L' + X(0) + ' ' + Y(min) + 'Z', fill: 'url(#revFill)' }));
-    var line1 = svgEl('path', { d: smoothPath(rp), fill: 'none', stroke: '#f07ca0', 'stroke-width': 2.6, 'stroke-linecap': 'round', class: 'draw' });
-    var line2 = svgEl('path', { d: smoothPath(pp), fill: 'none', stroke: '#7fd0e0', 'stroke-width': 2, 'stroke-linecap': 'round', class: 'draw' });
-    svg.appendChild(line1); svg.appendChild(line2);
-    var step = Math.max(1, Math.ceil(days.length / 7));
-    days.forEach(function (x, i) {
-      if (i % step && i !== days.length - 1) return;
-      var t = svgEl('text', { x: X(i), y: H - 6, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
-      t.textContent = x.date.slice(8, 10) + '.' + x.date.slice(5, 7); svg.appendChild(t);
-    });
-    var guide = svgEl('line', { y1: T, y2: H - B, stroke: 'rgba(255,255,255,.5)', 'stroke-width': 1, visibility: 'hidden' });
-    var dot1 = svgEl('circle', { r: 5, fill: '#fff', stroke: '#f07ca0', 'stroke-width': 2.5, visibility: 'hidden' });
-    var dot2 = svgEl('circle', { r: 4, fill: '#fff', stroke: '#7fd0e0', 'stroke-width': 2, visibility: 'hidden' });
-    svg.appendChild(guide); svg.appendChild(dot1); svg.appendChild(dot2);
-    var tip = el('div', { class: 'tip', hidden: true });
-    var box = el('div', { class: 'chart' }, [svg, tip]);
-    function show(clientX) {
-      var rect = svg.getBoundingClientRect();
-      var x = (clientX - rect.left) * W / rect.width;
-      var i = Math.max(0, Math.min(days.length - 1, Math.round((x - L) / ((W - L - R) / Math.max(1, days.length - 1)))));
-      [guide].forEach(function (g) { g.setAttribute('x1', X(i)); g.setAttribute('x2', X(i)); g.setAttribute('visibility', 'visible'); });
-      dot1.setAttribute('cx', X(i)); dot1.setAttribute('cy', Y(rev[i])); dot1.setAttribute('visibility', 'visible');
-      dot2.setAttribute('cx', X(i)); dot2.setAttribute('cy', Y(pro[i])); dot2.setAttribute('visibility', 'visible');
-      tip.replaceChildren(el('div', { class: 'muted', text: days[i].date.split('-').reverse().join('.') }),
-        el('div', { class: 'num' }, [el('span', { style: 'color:#f07ca0', text: '● ' }), money(rev[i])]),
-        el('div', { class: 'num' }, [el('span', { style: 'color:#7fd0e0', text: '● ' }), money(pro[i])]));
-      tip.hidden = false;
-      var px = X(i) / W * rect.width;
-      tip.style.left = Math.max(0, Math.min(rect.width - 130, px - 65)) + 'px';
-      haptic('light');
-    }
-    svg.addEventListener('pointerdown', function (e) { show(e.clientX); });
-    svg.addEventListener('pointermove', function (e) { if (e.buttons || e.pointerType === 'mouse') show(e.clientX); });
-    return box;
-  }
-
-  /** Сравнение с прошлым периодом: «↑ 12%», «↓ 5%», «—». */
-  function delta(cur, prev) {
-    if (!prev) return el('span', { class: 'delta', text: cur ? 'новое' : '—' });
-    var pct = Math.round((cur - prev) / Math.abs(prev) * 100);
-    return el('span', { class: 'delta ' + (pct >= 0 ? 'delta--up' : 'delta--down'), text: (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct) + '%' });
-  }
-
-  /** Кольцевая диаграмма: части с цветами, в центре — итог. */
-  function donut(parts, centerTop, centerBottom) {
-    var total = parts.reduce(function (a, x) { return a + x.value; }, 0);
-    var size = 132, rr = 52, C = 2 * Math.PI * rr;
-    var svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, width: size, height: size, role: 'img',
-      'aria-label': parts.map(function (x) { return x.label + ' ' + money(x.value); }).join(', ') });
-    svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: 'rgba(255,255,255,.12)', 'stroke-width': 16 }));
-    var off = 0;
-    parts.forEach(function (x) {
-      if (!x.value || !total) return;
-      var len = x.value / total * C;
-      svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: x.color, 'stroke-width': 16,
-        'stroke-dasharray': Math.max(0, len - 2) + ' ' + (C - Math.max(0, len - 2)), 'stroke-dashoffset': -off, transform: 'rotate(-90 66 66)', 'stroke-linecap': 'butt', class: 'ring' }));
-      off += len;
-    });
-    var t1 = svgEl('text', { x: 66, y: 64, 'text-anchor': 'middle', fill: '#fff', 'font-size': 17, 'font-weight': 700 }); t1.textContent = centerTop;
-    var t2 = svgEl('text', { x: 66, y: 82, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 11 }); t2.textContent = centerBottom;
-    svg.appendChild(t1); svg.appendChild(t2);
-    var legend = el('div', { class: 'legend' }, parts.filter(function (x) { return x.value; }).map(function (x) {
-      return el('div', { class: 'legend__row' }, [el('span', { class: 'legend__dot', style: 'background:' + x.color }), el('span', { text: x.label }),
-        el('b', { class: 'num', text: money(x.value) + (total ? ' · ' + Math.round(x.value / total * 100) + '%' : '') })]);
-    }));
-    return el('div', { class: 'donut' }, [svg, legend]);
+    setTimeout(function () { box.classList.add('done--out'); }, 1300);
+    setTimeout(function () { box.remove(); }, 1600);
+    return { title: title, note: note };
   }
 
   function uuid() {
@@ -473,13 +237,22 @@
 
   // ---------- сервер ----------
 
-  function api(body) {
+  // ---------- связь: запросы с тайм-аутом ----------
+
+  function netState(offline) { if (state.offline !== offline) { state.offline = offline; updateNet(); } }
+
+  function api(body, timeoutMs) {
     body.initData = tg ? tg.initData : '';
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, timeoutMs || 25000) : null;
     return fetch(window.FLORA_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // простой запрос — без CORS-предзапроса
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: ctl ? ctl.signal : undefined
     }).then(function (r) { return r.json(); }).then(function (res) {
+      clearTimeout(timer);
+      netState(false); // сервер ответил — связь есть, даже если ответ «нет»
       if (!res.ok) {
         var e = new Error(res.error && res.error.message || 'Ошибка');
         e.code = res.error && res.error.code;
@@ -487,19 +260,257 @@
         throw e;
       }
       return res.data;
+    }, function (e) {
+      clearTimeout(timer);
+      netState(true); // не достучались: обрыв, тайм-аут или не-JSON ответ Google
+      throw e;
     });
   }
 
+  // ---------- данные кассы: кэш на телефоне ----------
+
+  function uid() { try { return String(tg.initDataUnsafe.user.id); } catch (e) { return ''; } }
+  function readCache() {
+    var c = store(CACHE_KEY);
+    return c && c.uid === uid() && c.data && c.data.me && c.data.me.role === 'florist' && Date.now() - c.at < 36 * 3600000 ? c : null;
+  }
+  function writeCache(d) { if (d && d.me && d.me.role === 'florist') store(CACHE_KEY, { uid: uid(), at: Date.now(), data: d }); }
+  /** Данные пришли с сервера (fromServer) или из кэша. В кэш кладём «чистые» данные — до вычета очереди. */
+  function setData(d, fromServer) {
+    if (fromServer) { writeCache(d); state.fromCache = false; state.cacheAt = Date.now(); }
+    state.data = d;
+    applyQueue();
+  }
+
+  // ---------- очередь продаж ----------
+
+  function myQ() { var q = store(QUEUE_KEY); return (Array.isArray(q) ? q : []).filter(function (i) { return i.uid === uid(); }); }
+  function saveMyQ(list) {
+    var q = store(QUEUE_KEY);
+    var others = (Array.isArray(q) ? q : []).filter(function (i) { return i.uid !== uid(); });
+    store(QUEUE_KEY, others.concat(list).length ? others.concat(list) : null);
+  }
+  function pendingQ() { return myQ().filter(function (i) { return i.status !== 'failed'; }); }
+  function failedQ() { return myQ().filter(function (i) { return i.status === 'failed'; }); }
+  function queueItemTotals(list) {
+    var by = {};
+    list.forEach(function (i) { i.payload.items.forEach(function (x) { by[x.item_id] = (by[x.item_id] || 0) + x.qty; }); });
+    return by;
+  }
+  /** Остатки и выручка на экране с учётом продаж, которые ещё в очереди. */
+  function applyQueue() { applyList(pendingQ()); }
+  function applyList(list) {
+    if (!state.data || !state.data.catalog || !list.length) return;
+    var by = queueItemTotals(list);
+    state.data.catalog.forEach(function (c) { if (by[c.item_id]) c.stock = Math.max(0, c.stock - by[c.item_id]); });
+    if (state.data.shift) {
+      state.data.shift.revenue += list.reduce(function (a, i) { return a + i.total; }, 0);
+      state.data.shift.receipts_count += list.length;
+    }
+  }
+
+  /** Отказ сервера: вернуть на экран остаток и выручку, которые мы списали заранее. */
+  function unapplyList(list) {
+    if (!state.data || !state.data.catalog || !list.length) return;
+    var by = queueItemTotals(list);
+    state.data.catalog.forEach(function (c) { if (by[c.item_id]) c.stock += by[c.item_id]; });
+    if (state.data.shift) {
+      state.data.shift.revenue -= list.reduce(function (a, i) { return a + i.total; }, 0);
+      state.data.shift.receipts_count -= list.length;
+    }
+  }
+
+  var RETRY = [3000, 6000, 15000, 30000];
+  var pumping = false, retryStep = 0, retryTimer = null;
+  var FRIENDLY = {
+    NO_OPEN_SHIFT: 'Смена закрыта. Откройте смену в чате бота и оформите продажу заново.',
+    SHIFT_CHANGED: null, // у сервера уже понятный текст
+    NOT_ON_SHIFT: 'Вы не работаете в открытой смене.',
+    DISCOUNT_TOO_BIG: 'Скидка больше цены — уменьшите скидку.',
+    ZERO_TOTAL: 'Итого получилось 0 ₸. Подарок оформляется как «Ещё → Брак → Подарок».',
+    BALANCE_MISMATCH: 'Сумма оплат не сходится с итогом — проверьте способ оплаты.',
+    AUTH: 'Вход в кассу устарел — закройте её и откройте снова из бота.',
+    FORBIDDEN: 'Доступ отключён владелицей.'
+  };
+  function nameOf(id) {
+    var c = state.data && state.data.catalog ? state.data.catalog.filter(function (x) { return x.item_id === id; })[0] : null;
+    return c ? c.name : id;
+  }
+  function friendly(e) {
+    if (e.code === 'NOT_ENOUGH_STOCK' && e.details) {
+      return 'Не хватает на складе: ' + e.details.map(function (x) { return nameOf(x.item_id) + ' — есть ' + x.have + ', нужно ' + x.need; }).join('; ');
+    }
+    return FRIENDLY[e.code] || e.message || 'Не получилось провести';
+  }
+
+  /** Отправка очереди: строго по одной и по порядку; обрыв связи — повтор с теми же номерами операций. */
+  function pump() {
+    if (pumping) return;
+    var q = myQ();
+    var item = q.filter(function (i) { return i.status === 'pending' || i.status === 'sending'; })[0];
+    if (!item || state.authExpired) { updateNet(); return; }
+    pumping = true;
+    clearTimeout(retryTimer);
+    item.status = 'sending';
+    saveMyQ(q);
+    updateNet();
+    api({ action: 'post', kind: item.kind, op_id: item.op_id, payload: item.payload }, 25000)
+      .then(function (res) {
+        pumping = false;
+        retryStep = 0;
+        saveMyQ(myQ().filter(function (i) { return i.id !== item.id; }));
+        setData(res.state, true);
+        if (state.doneBox && state.doneBox.id === item.id && document.body.contains(state.doneBox.title)) {
+          state.doneBox.title.textContent = 'Проведено';
+          state.doneBox.note.textContent = '';
+        }
+        if (['main', 'stock', 'preorders', 'more'].indexOf(state.screen) >= 0) render(); else updateNet();
+        pump();
+      })
+      .catch(function (e) {
+        pumping = false;
+        var q2 = myQ();
+        var it = q2.filter(function (i) { return i.id === item.id; })[0];
+        if (!it) { pump(); return; }
+        if (e.code === 'AUTH') { it.status = 'pending'; saveMyQ(q2); state.authExpired = true; updateNet(); return; }
+        if (!e.code || e.code === 'BUSY' || e.code === 'SERVER') { // повторим позже, продажа не потеряна
+          it.status = 'pending'; saveMyQ(q2); updateNet();
+          retryTimer = setTimeout(pump, RETRY[Math.min(retryStep++, RETRY.length - 1)]);
+          return;
+        }
+        if (e.code === 'OP_FAILED' && (it.tries || 0) < 2) { // ночная проверка отменила зависшую операцию — оформляем под новым номером
+          it.op_id = uuid(); it.tries = (it.tries || 0) + 1; it.status = 'pending'; saveMyQ(q2); pump(); return;
+        }
+        it.status = 'failed'; it.code = e.code; it.error = friendly(e); it.details = e.details || null;
+        saveMyQ(q2);
+        unapplyList([it]);
+        haptic('error');
+        toast('Продажа на ' + money(it.total) + ' не проведена: ' + it.error, true);
+        if (['main', 'stock', 'preorders', 'more'].indexOf(state.screen) >= 0) render(); else updateNet();
+        pump();
+      });
+  }
+
+  /** Полоска вверху: нет связи / отправляем / не проведено. */
+  function updateNet() {
+    var box = document.getElementById('net');
+    if (!box) return;
+    var failed = failedQ().length, pend = pendingQ().length;
+    var text = '', cls = '';
+    if (state.authExpired) { cls = 'net--bad'; text = 'Вход в кассу устарел — закройте её и откройте снова из бота. Продаж в очереди: ' + pend + '.'; }
+    else if (failed) { cls = 'net--bad'; text = '⚠️ Не проведено продаж: ' + failed + ' — нажмите, чтобы разобраться'; }
+    else if (pend && state.offline) { cls = 'net--off'; text = 'Нет связи — продаж сохранено: ' + pend + '. Отправятся сами, когда появится сеть.'; }
+    else if (pend) { cls = 'net--sync'; text = 'Отправляем продаж: ' + pend + '…'; }
+    else if (state.offline && state.fromCache) { cls = 'net--off'; text = 'Нет связи — остатки на ' + new Date((state.cacheAt || Date.now()) + 5 * 3600000).toISOString().slice(11, 16) + '. Продажи сохранятся и отправятся сами.'; }
+    else if (state.offline) { cls = 'net--off'; text = 'Нет связи. Продажи сохранятся на телефоне и отправятся сами.'; }
+    else { box.hidden = true; return; }
+    box.className = 'net ' + cls;
+    box.textContent = text;
+    box.hidden = false;
+    box.onclick = function () { if (myQ().length) openScreen('queue'); };
+  }
+
+  /** Вернуть не проведённую продажу в корзину — исправить и провести заново. */
+  function restoreToDraft(item) {
+    var d = newDraft();
+    d.type = item.kind;
+    item.payload.items.forEach(function (x) { d.cart[x.item_id] = x.qty; });
+    d.price = String(item.payload.price);
+    var disc = item.payload.discount || { kind: 'none' };
+    d.disc = disc.kind;
+    d.discVal = disc.kind === 'pct' ? String(disc.value / 100).replace('.', ',') : disc.kind === 'amount' ? String(disc.value) : '';
+    var pays = item.payload.payments || [];
+    var dc = item.payload.debt_customer;
+    if (dc) {
+      d.pay = 'debt';
+      d.cashPart = pays[0] ? String(pays[0].amount) : '';
+      d.cust = dc.customer_id ? { id: dc.customer_id } : { name: dc.new_customer.name, note: dc.new_customer.note, confirm: !!dc.new_customer.confirm_new };
+    } else if (pays.length === 2) {
+      d.pay = 'mixed';
+      d.cashPart = String(pays.filter(function (x) { return x.method === 'cash'; })[0].amount);
+    } else d.pay = pays[0] ? pays[0].method : 'cash';
+    saveMyQ(myQ().filter(function (i) { return i.id !== item.id; }));
+    state.draft = d;
+    saveDraft();
+    state.shortage = null;
+    if (item.code === 'NOT_ENOUGH_STOCK' && item.details) {
+      state.shortage = {};
+      item.details.forEach(function (x) { state.shortage[x.item_id] = { need: x.need, have: x.have }; });
+    }
+    var where = { DISCOUNT_TOO_BIG: 'discount', ZERO_TOTAL: 'discount', BALANCE_MISMATCH: 'pay', UNKNOWN_CUSTOMER: 'customer', SIMILAR_CUSTOMERS: 'customer', NOT_ENOUGH_STOCK: 'stock' }[item.code] || 'general';
+    state.fieldError = { where: where, text: item.error, code: item.code, details: item.details };
+    state.screen = 'sale';
+    render();
+  }
+
+  // ---------- загрузка ----------
+
   function load() {
+    var cached = readCache();
+    if (cached) { // касса открывается сразу из кэша, свежие данные подтянутся следом
+      setData(cached.data, false);
+      state.fromCache = true;
+      state.cacheAt = cached.at;
+      render();
+    }
     return api({ action: 'bootstrap' }).then(function (data) {
-      state.data = data;
+      setData(data, true);
       // Ссылка «Закрыть смену в кассе» из чата (передача смены) открывает сразу закрытие.
       if (data.me.role === 'owner') { openScreen('owner_today'); return; }
       if (location.hash === '#close' && data.shift && data.shift.on_shift) { history.replaceState(null, '', location.pathname); openClose(); return; }
       render();
+      pump();
     })
-      .catch(function (e) { renderMessage(e.code ? e.message : 'Нет связи с сервером. Проверьте интернет и откройте кассу заново.'); });
+      .catch(function (e) {
+        if (cached && !e.code) { render(); pump(); return; } // нет связи, но есть данные на телефоне — работаем
+        renderMessage(e.code ? e.message : 'Нет связи с сервером. Проверьте интернет и откройте кассу заново.');
+      });
   }
+
+  /** Тихо обновить данные, когда касса снова на экране (не трогаем экран продажи). */
+  var lastRefresh = 0;
+  function silentRefresh() {
+    if (!state.data || Date.now() - lastRefresh < 45000 || !state.data.me || state.data.me.role !== 'florist') return;
+    lastRefresh = Date.now();
+    api({ action: 'bootstrap' }).then(function (data) {
+      setData(data, true);
+      if (['main', 'stock', 'preorders', 'more'].indexOf(state.screen) >= 0) render();
+      pump();
+    }).catch(function () { /* связи нет — остаёмся на том, что есть */ });
+  }
+
+  /** Экран «Очередь»: что ждёт отправки и что не проведено. */
+  SCREENS_EARLY.queue = function () {
+    backButton(true);
+    mainButton(null);
+    var q = myQ();
+    var nodes = [el('h1', { class: 'h1', text: 'Очередь продаж' }),
+      el('div', { class: 'muted', text: 'Продажи, которые ещё не приняты сервером. Ничего не потеряно: пока нет связи, они хранятся на телефоне и отправляются сами.' })];
+    if (!q.length) nodes.push(emptyState('Очередь пуста', 'Все продажи проведены.'));
+    q.forEach(function (i) {
+      var parts = i.payload.items.map(function (x) { return nameOf(x.item_id) + ' ×' + x.qty; }).join(', ');
+      var when = new Date(i.created + 5 * 3600000).toISOString().slice(11, 16);
+      var card = el('div', { class: 'card' + (i.status === 'failed' ? ' card--note' : '') }, [
+        el('div', { class: 'sum' }, [el('b', { text: (i.kind === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + when }), el('b', { class: 'num', text: money(i.total) })]),
+        el('div', { class: 'muted', text: parts }),
+        i.status === 'failed'
+          ? el('div', { class: 'error', text: 'НЕ ПРОВЕДЕНА: ' + i.error + '. В кассу эта продажа не записана.' })
+          : el('div', { class: 'muted', text: i.status === 'sending' ? 'Отправляется…' : state.offline ? 'Ждёт связи' : 'Ждёт отправки' })
+      ]);
+      if (i.status === 'failed') {
+        card.appendChild(el('button', { class: 'btn btn--primary', onclick: function () { restoreToDraft(i); } }, [icon('edit'), 'Исправить и провести заново']));
+        card.appendChild(el('button', { class: 'btn', onclick: function () {
+          if (!window.confirm('Убрать эту продажу? Она не записана в кассу, деньги по ней учитывать не нужно.')) return;
+          saveMyQ(myQ().filter(function (x) { return x.id !== i.id; }));
+          render();
+        } }, ['Убрать (в кассу не записана)']));
+      } else {
+        card.appendChild(el('button', { class: 'btn', onclick: function () { clearTimeout(retryTimer); retryStep = 0; pump(); toast('Пробуем отправить…'); } }, [icon('refresh'), 'Отправить сейчас']));
+      }
+      nodes.push(card);
+    });
+    app.replaceChildren.apply(app, nodes);
+  };
 
   // ---------- черновик продажи (живёт на телефоне до «Проведено») ----------
 
@@ -510,7 +521,7 @@
     if (!state.draft) state.draft = store(DRAFT_KEY) || newDraft();
     return state.draft;
   }
-  function saveDraft() { store(DRAFT_KEY, state.draft); }
+  function saveDraft() { state.fieldError = null; store(DRAFT_KEY, state.draft); }
 
   function catalogSum(d) {
     return state.data.catalog.reduce(function (s, c) { return s + (d.cart[c.item_id] || 0) * c.price; }, 0);
@@ -527,26 +538,26 @@
     var sum = catalogSum(d);
     var price = d.price == null ? sum : intOf(d.price);
     var out = { items: items, sum: sum, price: price, total: 0, error: '', payload: null };
-    if (!items.length) { out.error = 'Выберите позиции'; return out; }
-    if (!price) { out.error = 'Введите цену'; return out; }
+    if (!items.length) { out.error = 'Выберите позиции'; out.where = 'items'; return out; }
+    if (!price) { out.error = 'Введите цену'; out.where = 'price'; return out; }
     var discount = d.disc === 'none' ? { kind: 'none' }
       : { kind: d.disc, value: d.disc === 'pct' ? Math.round((parseFloat(String(d.discVal).replace(',', '.')) || 0) * 100) : (intOf(d.discVal) || 0) };
     try {
       out.total = Calc.receiptTotal(price, discount).total;
-    } catch (e) { out.error = e.message; return out; }
+    } catch (e) { out.error = e.message; out.where = 'discount'; return out; }
     var payments;
     var debtCustomer;
     if (d.pay === 'cash') payments = [{ method: 'cash', amount: out.total }];
     else if (d.pay === 'card') payments = [{ method: 'card', amount: out.total }];
     else if (d.pay === 'debt') {
       debtCustomer = customerRef(d.cust || {});
-      if (!debtCustomer) { out.error = 'Выберите должника или впишите имя'; return out; }
+      if (!debtCustomer) { out.error = 'Выберите должника из списка или впишите имя'; out.where = 'customer'; return out; }
       var now = d.cashPart === '' || d.cashPart == null ? 0 : intOf(d.cashPart);
-      if (now === null || now >= out.total) { out.error = 'Оплачено сейчас — меньше итога'; return out; }
+      if (now === null || now >= out.total) { out.error = 'Оплачено сейчас должно быть меньше итога — остальное уйдёт в долг'; out.where = 'pay'; return out; }
       payments = now ? [{ method: 'cash', amount: now }] : [];
     } else {
       var cash = intOf(d.cashPart);
-      if (!cash || cash >= out.total) { out.error = 'Наличные — больше нуля и меньше итога'; return out; }
+      if (!cash || cash >= out.total) { out.error = 'Наличные — больше нуля и меньше итога, остальное будет безналом'; out.where = 'pay'; return out; }
       payments = [{ method: 'cash', amount: cash }, { method: 'card', amount: out.total - cash }];
     }
     out.payload = { items: items, price: price, discount: discount, payments: payments };
@@ -585,7 +596,7 @@
   // ---------- нижнее меню ----------
 
   var NAV_OF = {
-    main: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
+    main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
     owner_period: 'owner_period', owner_debtors: 'owner_debtors'
   };
@@ -626,6 +637,7 @@
     else if (SCREENS[state.screen]) SCREENS[state.screen]();
     else renderMain();
     renderNav();
+    updateNet();
     // Плавное появление — только при переходе на другой экран, не при каждом нажатии.
     if (app.getAttribute('data-shown') !== state.screen) {
       app.setAttribute('data-shown', state.screen);
@@ -768,6 +780,13 @@
       if (next < 0 || next > c.stock) return;
       if (next) d.cart[c.item_id] = next; else delete d.cart[c.item_id];
       saveDraft();
+      // Подсказка о нехватке гаснет, как только в корзине стало не больше, чем есть на складе.
+      var sh = state.shortage && state.shortage[c.item_id];
+      if (sh && next <= c.stock) {
+        delete state.shortage[c.item_id];
+        if (!Object.keys(state.shortage).length) state.shortage = null;
+        return renderSale();
+      }
       renderTilesOnly();
       renderBottom();
     }
@@ -776,6 +795,19 @@
     var bottom = el('div', { class: 'card', id: 'bottom' });
     function renderBottom() {
       var sm = summary(d);
+      // Сообщение у самого поля: серверный отказ (после «Исправить») или локальная проверка.
+      var note = function (w) {
+        var fe = state.fieldError;
+        var txt = fe && fe.where === w ? fe.text : (sm.where === w && sm.error && sm.items.length ? sm.error : '');
+        if (!txt) return null;
+        var kids = [el('div', { class: 'error', text: txt })];
+        if (fe && fe.where === w && fe.code === 'SIMILAR_CUSTOMERS' && fe.details) {
+          fe.details.forEach(function (c) {
+            kids.push(el('button', { class: 'chip', onclick: function () { d.cust = { id: c.customer_id }; saveDraft(); renderBottom(); } }, [c.name + (c.note ? ' (' + c.note + ')' : '')]));
+          });
+        }
+        return el('div', { class: 'fielderr', role: 'alert' }, kids);
+      };
       var priceField = amountField('Цена (можно поставить свою)', d.price == null ? (sm.sum || '') : d.price, {
         quick: sm.sum ? [sm.sum, Math.ceil(sm.sum / 1000) * 1000, Math.ceil(sm.sum / 5000) * 5000].filter(function (v, i, a) { return a.indexOf(v) === i; }) : [1000, 5000, 10000],
         onDone: function (v) { d.price = v; saveDraft(); renderBottom(); } });
@@ -801,8 +833,8 @@
       var totals = el('div', { id: 'totals' });
       bottom.replaceChildren(
         el('div', { class: 'sum' }, [el('span', { class: 'muted', text: 'По каталогу' }), el('span', { class: 'num', text: money(sm.sum) })]),
-        priceField,
-        discChips, discInput, payChips, debtPicker, cashInput, change, changeLine, totals
+        priceField, note('price'),
+        discChips, discInput, note('discount'), payChips, debtPicker, note('customer'), cashInput, note('pay'), change, changeLine, totals
       );
       updateTotals();
     }
@@ -817,7 +849,6 @@
         var paidNow = sm.payload.payments.reduce(function (a, p) { return a + p.amount; }, 0);
         nodes.push(el('div', { class: 'muted num', text: 'В долг: ' + money(sm.total - paidNow) }));
       }
-      if (sm.error && sm.items.length) nodes.push(el('div', { class: 'error', text: sm.error }));
       if (t) t.replaceChildren.apply(t, nodes);
       var label = state.sending ? 'Проводим…' : (sm.payload ? 'Провести ' + money(sm.total) : 'Провести');
       mainButton(label, !!sm.payload && !state.sending, submit);
@@ -897,7 +928,7 @@
             var sm = summary(d);
             busy(postOp('template_save', { name: name, items: sm.items, price: sm.price || sm.sum }, uuid())).then(function (res) {
               if (!res) return;
-              state.data = res.state;
+              setData(res.state, true);
               toast('Шаблон «' + name + '» сохранён');
             });
           } }, ['Сохранить']),
@@ -907,7 +938,18 @@
       tplRow.after(naming);
       nameInput.focus();
     }
-    var nodes = [typeChips, tpls.length || lastOk || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
+    // Сверху: общая ошибка (смена закрыта и т. п.) и нехватка товара со ссылкой «Внести приход».
+    var fe0 = state.fieldError;
+    var generalNote = fe0 && fe0.where === 'general' ? el('div', { class: 'card card--note', role: 'alert' }, [
+      el('div', { class: 'error', text: fe0.text }),
+      el('button', { class: 'btn', onclick: function () { state.fieldError = null; goMain(); } }, ['На главную'])]) : null;
+    var stockNote = state.shortage ? el('div', { class: 'card card--note', role: 'alert' }, [
+      el('div', { class: 'error', text: 'Не хватает на складе: ' + Object.keys(state.shortage).map(function (id) {
+        return nameOf(id) + ' — есть ' + state.shortage[id].have + ', нужно ' + state.shortage[id].need; }).join('; ') }),
+      el('button', { class: 'btn', onclick: function () {
+        openScreen('income', { lines: Object.keys(state.shortage).map(function (id) { return { item_id: id, qty: '', cost: '' }; }) });
+      } }, [icon('truck-delivery'), 'Внести приход'])]) : null;
+    var nodes = [generalNote, stockNote, typeChips, tpls.length || lastOk || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
     nodes.push(sumbar);
     if (!tg) nodes.push(el('button', { class: 'btn btn--primary fallback-main', id: 'fallback', onclick: submit }, ['Провести']));
     app.replaceChildren.apply(app, nodes);
@@ -919,6 +961,13 @@
   var CLOSE_KEY = 'flora.close.v1';
 
   function openClose() {
+    // Нельзя закрывать смену, пока есть неотправленные продажи: они попали бы не в ту смену.
+    var left = myQ();
+    if (left.length) {
+      toast('Сначала дождитесь отправки продаж: в очереди ' + left.length + (failedQ().length ? ' (есть не проведённые)' : ''), true);
+      openScreen('queue');
+      return;
+    }
     var saved = store(CLOSE_KEY);
     var s = state.data.shift;
     if (saved && saved.shift_no === s.shift_no) state.close = saved;
@@ -984,7 +1033,7 @@
       items.forEach(function (i) { facts[i.item_id] = intOf(c.facts[i.item_id]); });
       busy(postOp('inventory', { facts: facts })).then(function (res) {
         if (!res) return;
-        state.data = res.state;
+        setData(res.state, true);
         var adj = res.result.adjustments || [];
         toast(adj.length ? 'Расхождений: ' + adj.length + ' — записаны' : 'Остатки сошлись');
         goStep('exp');
@@ -1016,7 +1065,7 @@
       var op = form.type === 'withdrawal' ? postOp('withdrawal', { amount: sum }) : postOp('cash_out', { type: form.type, amount: sum, comment: form.comment });
       busy(op).then(function (res) {
         if (!res) return;
-        state.data = res.state;
+        setData(res.state, true);
         c.exp = null; saveClose();
         toast('Добавлено: ' + money(sum));
         render();
@@ -1077,7 +1126,7 @@
         haptic('success');
         c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no, clean: res.result.cash_diff === 0 };
         if (res.result.cash_diff === 0) setTimeout(petalBurst, 250);
-        state.data = res.state;
+        setData(res.state, true);
         goStep('done');
       });
     }
@@ -1214,7 +1263,7 @@
     busy(postOp(kind, payload, f.op_id)).then(function (res) {
       if (!res) return;
       haptic('success');
-      state.data = res.state;
+      setData(res.state, true);
       toast((res.status === 'already' ? 'Уже было проведено. ' : '') + okText);
       if (next) next(res); else { state.screen = 'main'; render(); }
     });
@@ -1259,7 +1308,7 @@
               throw e;
             })).then(function (res) {
             if (!res) { render(); return; }
-            state.data = res.state;
+            setData(res.state, true);
             f.lines.push({ item_id: res.result.item_id, qty: '', cost: '' });
             f.newItem = { open: false, category: 'flowers', name: '', price: '' };
             toast('Позиция добавлена — впишите количество и сумму');
@@ -1847,47 +1896,43 @@
   }
 
   function doSubmit(d, sm) {
-    if (state.sending) return;
-    state.sending = true;
-    if (tg) tg.MainButton.showProgress(false);
+    var sh = state.data.shift;
+    if (!sh || !sh.on_shift) { state.fieldError = { where: 'general', text: 'Смена не открыта. Откройте смену в чате бота — и оформите продажу.', code: 'NO_OPEN_SHIFT' }; render(); return; }
+    var how = { cash: 'наличными', card: 'безналом', mixed: 'нал + безнал', debt: 'в долг' }[d.pay] || '';
+    var change = d.pay === 'cash' && d.given && Number(d.given) > sm.total ? ' · сдача ' + money(Number(d.given) - sm.total) : '';
+    // Продажа сначала сохраняется на телефоне (с номером операции и номером смены), потом уходит на сервер.
+    var item = {
+      id: uuid(), uid: uid(), kind: d.type, op_id: d.op_id, total: sm.total, created: Date.now(), status: 'pending', tries: 0,
+      payload: Object.assign({}, sm.payload, { shift_no: sh.shift_no })
+    };
+    var q = myQ();
+    q.push(item);
+    saveMyQ(q);
+    if (!myQ().some(function (i) { return i.id === item.id; })) { // телефон не дал сохранить (например, приватный режим) — не обещаем того, чего нет
+      state.fieldError = { where: 'general', text: 'Телефон не даёт сохранить продажу (возможно, включён приватный режим). Продажа не оформлена — откройте кассу в обычном режиме.', code: 'STORAGE' };
+      render();
+      return;
+    }
+    state.lastSale = {
+      shop: (state.data.shop && state.data.shop.name) || 'Флора·Учёт', type: d.type, how: how, total: sm.total,
+      discount: sm.payload.price - sm.total,
+      items: sm.payload.items.map(function (x) { return { name: nameOf(x.item_id), qty: x.qty }; }),
+      when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16).replace('T', ' ').split(' ').map(function (v, i) { return i ? v : v.split('-').reverse().join('.'); }).join(' · ')
+    };
+    store(LAST_KEY, { type: d.type, price: sm.payload.price, items: sm.payload.items });
+    // Черновик пуст сразу: второе нажатие «Провести» ничего не проведёт.
+    state.draft = newDraft();
+    store(DRAFT_KEY, null);
+    state.shortage = null;
+    state.fieldError = null;
+    // Остатки и выручка на экране — сразу, не дожидаясь сервера (только эта продажа: прежние уже учтены).
+    applyList([item]);
+    haptic('success');
+    var box = showDone(sm.total, (d.type === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + how + change, false, true);
+    state.doneBox = { id: item.id, title: box.title, note: box.note };
+    state.screen = 'main';
     render();
-    api({ action: 'post', kind: d.type, op_id: d.op_id, payload: sm.payload })
-      .then(function (res) {
-        state.data = res.state;
-        state.draft = newDraft();
-        store(DRAFT_KEY, null);
-        haptic('success');
-        var how = { cash: 'наличными', card: 'безналом', mixed: 'нал + безнал', debt: 'в долг' }[d.pay] || '';
-        var change = d.pay === 'cash' && d.given && Number(d.given) > res.result.total ? ' · сдача ' + money(Number(d.given) - res.result.total) : '';
-        showDone(res.result.total, (d.type === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + how + change, res.status === 'already');
-        var names = {};
-        (state.data.catalog || []).forEach(function (c) { names[c.item_id] = c.name; });
-        state.lastSale = {
-          shop: (state.data.shop && state.data.shop.name) || 'Флора·Учёт', type: d.type, how: how, total: res.result.total,
-          discount: sm.payload.price - res.result.total,
-          items: sm.payload.items.map(function (x) { return { name: names[x.item_id] || x.item_id, qty: x.qty }; }),
-          when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16).replace('T', ' ').split(' ').map(function (v, i) { return i ? v : v.split('-').reverse().join('.'); }).join(' · ')
-        };
-        store(LAST_KEY, { type: d.type, price: sm.payload.price, items: sm.payload.items });
-        state.shortage = null;
-        state.screen = 'main';
-      })
-      .catch(function (e) {
-        haptic('error');
-        if (!e.code) toast('Нет связи. Продажа сохранена на телефоне — нажмите «Провести» ещё раз.', true);
-        else if (e.code === 'NOT_ENOUGH_STOCK' && e.details) {
-          // Кто-то успел продать раньше: показываем нехватку прямо на плитках.
-          state.shortage = {};
-          e.details.forEach(function (x) { state.shortage[x.item_id] = { need: x.need, have: x.have }; });
-          toast('Не хватает товара — отмечено на плитках', true);
-        } else toast(e.message, true);
-        if (e.code === 'OP_FAILED') { d.op_id = uuid(); saveDraft(); }
-      })
-      .then(function () {
-        state.sending = false;
-        if (tg) tg.MainButton.hideProgress();
-        render();
-      });
+    pump();
   }
 
   // ---------- старт ----------
@@ -1903,5 +1948,11 @@
     renderMessage('Откройте кассу из бота: кнопка «Касса» в меню @flora_uchet_bot.');
     return;
   }
+  window.addEventListener('online', function () { netState(false); clearTimeout(retryTimer); retryStep = 0; pump(); silentRefresh(); });
+  window.addEventListener('offline', function () { netState(true); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { pump(); silentRefresh(); } });
+  setInterval(pump, 20000); // страховка: если таймер потерялся, очередь всё равно уйдёт
+  // Продажи, оставшиеся в очереди с прошлого раза, считаем неотправленными.
+  saveMyQ(myQ().map(function (i) { if (i.status === 'sending') i.status = 'pending'; return i; }));
   load();
 })();

@@ -668,3 +668,16 @@ test('остатки и должники для владелицы', () => {
   assert.ok(Reports.debtorsText(d).replace(/ /g, ' ').includes('Итого долгов: 4 500 ₸'));
   assert.equal(Reports.debtorsText([]), 'Должников нет.');
 });
+
+test('продажа из очереди, оформленная в другой смене, не проводится (SHIFT_CHANGED), в своей — проводится', () => {
+  const w = world();
+  openGolden(w);
+  const no = w.view().openShift().shift_no;
+  const sale = { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [{ method: 'cash', amount: 300 }] };
+  assert.throws(() => w.post('s_anna', 'sale', { ...sale, shift_no: no - 1 }), { code: 'SHIFT_CHANGED' });
+  assert.throws(() => w.post('s_anna', 'bouquet', { ...sale, shift_no: no + 1 }), { code: 'SHIFT_CHANGED' });
+  assert.equal(w.view().stock('kraft'), 61, 'отказ ничего не записал');
+  w.post('s_anna', 'sale', { ...sale, shift_no: no });
+  assert.equal(w.view().stock('kraft'), 60);
+  w.post('s_anna', 'sale', sale); // старые клиенты без номера смены продолжают работать
+});
