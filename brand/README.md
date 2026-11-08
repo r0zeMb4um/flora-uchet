@@ -6,4 +6,4 @@
 | `cover.png` (640×360) | картинка в описании (видна до «Запустить») | @BotFather → `/setdescriptionpic` → выбрать бота → отправить файл как фото |
 
 Тексты описания ставит `connectBot()` (setMyDescription, setMyShortDescription).
-Исходники картинок — `avatar.html`, `cover.html` (поменять и пересохранить скриншотом Chrome 640×640 / 640×360).
+Фирменный цветок — ранункулюс: `ranunculus.svg` (он же в кассе: `miniapp/img/ranunculus.svg`, шапка и пустые экраны). Исходники картинок — `avatar.html`, `cover.html` (поменять и пересохранить скриншотом Chrome 640×640 / 640×360).

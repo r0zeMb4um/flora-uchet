@@ -37,19 +37,10 @@
     var h = new Date(Date.now() + 5 * 3600000).getUTCHours(); // время Алматы
     return h >= 5 && h < 12 ? 'Доброе утро' : h < 18 && h >= 12 ? 'Добрый день' : 'Добрый вечер';
   }
-  /** Линейный рисунок-букет для пустых экранов (без внешних файлов). */
-  var BOUQUET_SVG = '<svg viewBox="0 0 120 120" width="112" height="112" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M44 108 L60 70 L76 108 Z" fill="rgba(252,214,226,.18)"/>' +
-    '<path d="M60 70 L50 46 M60 70 L60 40 M60 70 L72 48"/>' +
-    '<circle cx="48" cy="38" r="9" fill="rgba(224,80,126,.55)"/><circle cx="60" cy="30" r="10" fill="rgba(240,124,160,.6)"/><circle cx="74" cy="40" r="9" fill="rgba(224,80,126,.55)"/>' +
-    '<path d="M44 38 q4 -6 8 0 M56 30 q4 -7 8 0 M70 40 q4 -6 8 0"/>' +
-    '<path d="M50 56 q-12 -2 -16 -12 q12 0 16 12 M70 58 q12 -2 16 -12 q-12 0 -16 12" fill="rgba(159,232,192,.25)"/>' +
-    '<path d="M52 96 h16"/></svg>';
-
   /** Пустое состояние: рисунок, заголовок, пояснение, необязательная кнопка. */
   function emptyState(titleText, text, action) {
-    var pic = el('div', { class: 'empty__pic' });
-    pic.innerHTML = BOUQUET_SVG;
+    // Ранункулюс — фирменный цветок кассы (img/ranunculus.svg, тот же, что на аватаре бота).
+    var pic = el('div', { class: 'empty__pic' }, [el('img', { src: 'img/ranunculus.svg', width: '112', height: '112', alt: '' })]);
     return el('div', { class: 'card empty' }, [
       pic,
       el('div', { class: 'empty__title script', text: titleText }),
