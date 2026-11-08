@@ -235,6 +235,249 @@
     return null;
   }
 
+  // ---------- картинки для пересылки: чек клиенту и карточка дня ----------
+
+  function loadImg(src) {
+    return new Promise(function (ok, fail) { var i = new Image(); i.onload = function () { ok(i); }; i.onerror = fail; i.src = src; });
+  }
+  function rrect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  var SCRIPT = 'italic 600 {px}px "Cormorant Garamond", Georgia, serif';
+  var SANS = '{w} {px}px Manrope, Arial, sans-serif';
+  function font(tpl, px, w) { return tpl.replace('{px}', px).replace('{w}', w || 600); }
+
+  /** Фон и шапка в фирменном стиле. Возвращает canvas и контекст. */
+  function brandCanvas(h, shopName, logo) {
+    var c = document.createElement('canvas');
+    c.width = 1080; c.height = h;
+    var g = c.getContext('2d');
+    var bg = g.createLinearGradient(0, 0, 1080, h);
+    bg.addColorStop(0, '#163940'); bg.addColorStop(.55, '#24545d'); bg.addColorStop(1, '#4f8790');
+    g.fillStyle = bg; g.fillRect(0, 0, 1080, h);
+    [[960, 140, 360, 'rgba(247,168,196,.95)'], [60, h - 80, 460, 'rgba(242,182,201,.9)'], [1040, h * 0.62, 220, 'rgba(252,214,226,.7)']].forEach(function (b) {
+      var rg = g.createRadialGradient(b[0], b[1], 0, b[0], b[1], b[2]);
+      rg.addColorStop(0, b[3]); rg.addColorStop(.45, 'rgba(224,80,126,.45)'); rg.addColorStop(1, 'rgba(224,80,126,0)');
+      g.fillStyle = rg; g.fillRect(0, 0, 1080, h);
+    });
+    g.drawImage(logo, 64, 52, 132, 132);
+    g.fillStyle = '#fff'; g.font = font(SCRIPT, 76); g.textBaseline = 'alphabetic';
+    g.fillText(shopName, 214, 132);
+    g.font = font(SANS, 22, 600); g.globalAlpha = .85;
+    g.fillText('Ц В Е Т О Ч Н А Я   К А С С А', 218, 172); g.globalAlpha = 1;
+    return { c: c, g: g };
+  }
+  function glass(g, x, y, w, h) {
+    rrect(g, x, y, w, h, 44);
+    g.fillStyle = 'rgba(18,48,54,.38)'; g.fill();
+    g.fillStyle = 'rgba(255,255,255,.14)'; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.stroke();
+    g.fillStyle = '#fff'; // текст после стекла — снова белый
+  }
+  function fit(g, text, maxW) {
+    var t = String(text);
+    while (t.length > 3 && g.measureText(t).width > maxW) t = t.slice(0, -2);
+    return t === String(text) ? t : t.slice(0, -1) + '…';
+  }
+  function ready() {
+    var f = document.fonts;
+    return Promise.all([f ? f.load(font(SCRIPT, 60)) : 0, f ? f.load(font(SANS, 40, 700)) : 0, f ? f.load(font(SANS, 30, 500)) : 0,
+      loadImg('img/ranunculus.svg')]).then(function (x) { return x[3]; });
+  }
+
+  /** Чек для покупателя (не фискальный). */
+  function drawReceipt(sale) {
+    return ready().then(function (logo) {
+      var lines = sale.items.slice(0, 8);
+      var h = 1350;
+      var k = brandCanvas(h, sale.shop, logo);
+      var g = k.g;
+      glass(g, 64, 230, 952, 1000);
+      g.fillStyle = '#fff'; g.font = font(SCRIPT, 72); g.fillText('Спасибо за покупку!', 112, 340);
+      g.font = font(SANS, 30, 500); g.globalAlpha = .85; g.fillText(sale.when + (sale.type === 'bouquet' ? ' · букет' : ''), 116, 392); g.globalAlpha = 1;
+      var y = 470;
+      g.font = font(SANS, 36, 600);
+      lines.forEach(function (l) {
+        g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(fit(g, l.name, 720), 116, y);
+        g.textAlign = 'right'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText('× ' + l.qty, 964, y);
+        y += 58;
+      });
+      if (sale.items.length > lines.length) { g.textAlign = 'left'; g.fillText('и ещё ' + (sale.items.length - lines.length) + ' поз.', 116, y); y += 58; }
+      g.textAlign = 'left';
+      g.strokeStyle = 'rgba(255,255,255,.3)'; g.setLineDash([10, 10]); g.beginPath(); g.moveTo(116, y); g.lineTo(964, y); g.stroke(); g.setLineDash([]);
+      y += 64;
+      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
+      if (sale.discount) { g.fillText('Скидка', 116, y); g.textAlign = 'right'; g.fillText('− ' + money(sale.discount), 964, y); g.textAlign = 'left'; y += 56; }
+      g.fillStyle = '#fff'; g.font = font(SANS, 40, 700); g.fillText('Итого', 116, y + 40);
+      g.textAlign = 'right'; g.font = font(SANS, 92, 700); g.fillText(money(sale.total), 964, y + 50); g.textAlign = 'left';
+      y += 120;
+      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
+      g.fillText('Оплата: ' + sale.how, 116, y);
+      g.font = font(SCRIPT, 56); g.fillStyle = '#fcd6e2'; g.fillText('Ждём вас снова!', 116, 1150);
+      g.font = font(SANS, 22, 500); g.fillStyle = 'rgba(255,255,255,.7)'; g.fillText('Это не кассовый чек — фискальный чек выдаёт касса магазина.', 116, 1300);
+      g.drawImage(logo, 840, 1040, 150, 150);
+      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    });
+  }
+
+  /** Карточка дня для владелицы. */
+  function drawDayCard(day, shop) {
+    return Promise.all([ready(), day.top_item ? loadImg('img/flowers/' + artName(day.top_item) + '.svg').catch(function () { return null; }) : null]).then(function (x) {
+      var logo = x[0], topArt = x[1];
+      var k = brandCanvas(1350, shop, logo);
+      var g = k.g;
+      var d = day.date.split('-').reverse().join('.');
+      g.fillStyle = '#fff'; g.font = font(SCRIPT, 84); g.fillText('Вчера, ' + d.slice(0, 5), 96, 330);
+      glass(g, 64, 380, 952, 330);
+      g.font = font(SANS, 34, 600); g.globalAlpha = .85; g.fillText('Выручка', 116, 460); g.globalAlpha = 1;
+      g.font = font(SANS, 132, 700); g.fillText(money(day.revenue), 112, 600);
+      g.font = font(SANS, 32, 500); g.globalAlpha = .85; g.fillText('чеков ' + day.receipts + ' · средний чек ' + money(day.avg_check), 116, 670); g.globalAlpha = 1;
+      glass(g, 64, 740, 952, 150);
+      var clean = day.all_closed && day.cash_diff === 0;
+      g.font = font(SANS, 44, 700); g.fillStyle = clean ? '#9fe8c0' : '#ffd27a';
+      g.fillText(!day.all_closed ? 'Смена не закрыта' : clean ? '✓ Касса сошлась до тенге' : 'Расхождение кассы ' + money(day.cash_diff), 116, 832);
+      if (day.top_item) {
+        glass(g, 64, 920, 952, 230);
+        if (topArt) g.drawImage(topArt, 100, 950, 170, 170);
+        g.fillStyle = '#fff'; g.font = font(SANS, 30, 600); g.globalAlpha = .85; g.fillText('Лучшая позиция дня', 300, 1010); g.globalAlpha = 1;
+        g.font = font(SCRIPT, 64); g.fillText(fit(g, day.top_item.name, 680), 300, 1080);
+        g.font = font(SANS, 30, 500); g.fillText(day.top_item.qty + ' шт', 300, 1126);
+      }
+      g.font = font(SCRIPT, 54); g.fillStyle = '#fcd6e2'; g.fillText('Хорошего дня!', 96, 1260);
+      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    });
+  }
+  function artName(c) {
+    var n = String(c.name || '').toLowerCase();
+    if (c.category === 'greens') return 'eucalyptus';
+    return /роз/.test(n) ? 'rose' : /тюльпан/.test(n) ? 'tulip' : /пион/.test(n) ? 'peony' : 'ranunculus';
+  }
+
+  /** Нарисовать и прислать себе в чат с ботом. */
+  function shareImage(draw, caption, okText) {
+    toast('Рисуем картинку…');
+    return draw().then(function (b64) { return api({ action: 'send_image', image: b64, caption: caption }); })
+      .then(function () { haptic('success'); toast(okText); })
+      .catch(function (e) { haptic('error'); toast(e && e.message ? e.message : 'Не получилось отправить картинку', true); });
+  }
+
+  // ---------- графики ----------
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  /** Плавная линия через точки (Catmull-Rom → кривые Безье). */
+  function smoothPath(pts) {
+    if (!pts.length) return '';
+    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
+    for (var i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      var c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      var c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+    }
+    return d;
+  }
+  function shortMoney(n) {
+    var a = Math.abs(n), sign = n < 0 ? '−' : '';
+    return sign + (a >= 1000000 ? (Math.round(a / 100000) / 10) + 'м' : a >= 1000 ? Math.round(a / 1000) + 'к' : String(a));
+  }
+
+  /** График «Выручка / Прибыль» по дням с подсказкой при касании. */
+  function lineChart(days) {
+    var W = 320, H = 170, L = 34, R = 8, T = 12, B = 22;
+    var rev = days.map(function (x) { return x.revenue; });
+    var pro = days.map(function (x) { return x.profit; });
+    var max = Math.max.apply(null, rev.concat(pro).concat([1]));
+    var min = Math.min.apply(null, pro.concat([0]));
+    var X = function (i) { return L + (days.length > 1 ? i * (W - L - R) / (days.length - 1) : (W - L - R) / 2); };
+    var Y = function (v) { return T + (max - v) * (H - T - B) / (max - min || 1); };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', role: 'img',
+      'aria-label': 'Выручка и прибыль по дням. Всего выручка ' + money(rev.reduce(function (a, v) { return a + v; }, 0)) });
+    var defs = svgEl('defs');
+    var gr = svgEl('linearGradient', { id: 'revFill', x1: 0, x2: 0, y1: 0, y2: 1 });
+    gr.appendChild(svgEl('stop', { offset: 0, 'stop-color': '#f07ca0', 'stop-opacity': .45 }));
+    gr.appendChild(svgEl('stop', { offset: 1, 'stop-color': '#f07ca0', 'stop-opacity': 0 }));
+    defs.appendChild(gr); svg.appendChild(defs);
+    [max, (max + min) / 2, min].forEach(function (v) {
+      svg.appendChild(svgEl('line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: 'rgba(255,255,255,.15)', 'stroke-dasharray': '3 4' }));
+      var t = svgEl('text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
+      t.textContent = shortMoney(Math.round(v)); svg.appendChild(t);
+    });
+    var rp = rev.map(function (v, i) { return [X(i), Y(v)]; });
+    var pp = pro.map(function (v, i) { return [X(i), Y(v)]; });
+    svg.appendChild(svgEl('path', { d: smoothPath(rp) + ' L' + X(days.length - 1) + ' ' + Y(min) + ' L' + X(0) + ' ' + Y(min) + 'Z', fill: 'url(#revFill)' }));
+    var line1 = svgEl('path', { d: smoothPath(rp), fill: 'none', stroke: '#f07ca0', 'stroke-width': 2.6, 'stroke-linecap': 'round', class: 'draw' });
+    var line2 = svgEl('path', { d: smoothPath(pp), fill: 'none', stroke: '#7fd0e0', 'stroke-width': 2, 'stroke-linecap': 'round', class: 'draw' });
+    svg.appendChild(line1); svg.appendChild(line2);
+    var step = Math.max(1, Math.ceil(days.length / 7));
+    days.forEach(function (x, i) {
+      if (i % step && i !== days.length - 1) return;
+      var t = svgEl('text', { x: X(i), y: H - 6, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 10 });
+      t.textContent = x.date.slice(8, 10) + '.' + x.date.slice(5, 7); svg.appendChild(t);
+    });
+    var guide = svgEl('line', { y1: T, y2: H - B, stroke: 'rgba(255,255,255,.5)', 'stroke-width': 1, visibility: 'hidden' });
+    var dot1 = svgEl('circle', { r: 5, fill: '#fff', stroke: '#f07ca0', 'stroke-width': 2.5, visibility: 'hidden' });
+    var dot2 = svgEl('circle', { r: 4, fill: '#fff', stroke: '#7fd0e0', 'stroke-width': 2, visibility: 'hidden' });
+    svg.appendChild(guide); svg.appendChild(dot1); svg.appendChild(dot2);
+    var tip = el('div', { class: 'tip', hidden: true });
+    var box = el('div', { class: 'chart' }, [svg, tip]);
+    function show(clientX) {
+      var rect = svg.getBoundingClientRect();
+      var x = (clientX - rect.left) * W / rect.width;
+      var i = Math.max(0, Math.min(days.length - 1, Math.round((x - L) / ((W - L - R) / Math.max(1, days.length - 1)))));
+      [guide].forEach(function (g) { g.setAttribute('x1', X(i)); g.setAttribute('x2', X(i)); g.setAttribute('visibility', 'visible'); });
+      dot1.setAttribute('cx', X(i)); dot1.setAttribute('cy', Y(rev[i])); dot1.setAttribute('visibility', 'visible');
+      dot2.setAttribute('cx', X(i)); dot2.setAttribute('cy', Y(pro[i])); dot2.setAttribute('visibility', 'visible');
+      tip.replaceChildren(el('div', { class: 'muted', text: days[i].date.split('-').reverse().join('.') }),
+        el('div', { class: 'num' }, [el('span', { style: 'color:#f07ca0', text: '● ' }), money(rev[i])]),
+        el('div', { class: 'num' }, [el('span', { style: 'color:#7fd0e0', text: '● ' }), money(pro[i])]));
+      tip.hidden = false;
+      var px = X(i) / W * rect.width;
+      tip.style.left = Math.max(0, Math.min(rect.width - 130, px - 65)) + 'px';
+      haptic('light');
+    }
+    svg.addEventListener('pointerdown', function (e) { show(e.clientX); });
+    svg.addEventListener('pointermove', function (e) { if (e.buttons || e.pointerType === 'mouse') show(e.clientX); });
+    return box;
+  }
+
+  /** Сравнение с прошлым периодом: «↑ 12%», «↓ 5%», «—». */
+  function delta(cur, prev) {
+    if (!prev) return el('span', { class: 'delta', text: cur ? 'новое' : '—' });
+    var pct = Math.round((cur - prev) / Math.abs(prev) * 100);
+    return el('span', { class: 'delta ' + (pct >= 0 ? 'delta--up' : 'delta--down'), text: (pct >= 0 ? '↑ ' : '↓ ') + Math.abs(pct) + '%' });
+  }
+
+  /** Кольцевая диаграмма: части с цветами, в центре — итог. */
+  function donut(parts, centerTop, centerBottom) {
+    var total = parts.reduce(function (a, x) { return a + x.value; }, 0);
+    var size = 132, rr = 52, C = 2 * Math.PI * rr;
+    var svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, width: size, height: size, role: 'img',
+      'aria-label': parts.map(function (x) { return x.label + ' ' + money(x.value); }).join(', ') });
+    svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: 'rgba(255,255,255,.12)', 'stroke-width': 16 }));
+    var off = 0;
+    parts.forEach(function (x) {
+      if (!x.value || !total) return;
+      var len = x.value / total * C;
+      svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: rr, fill: 'none', stroke: x.color, 'stroke-width': 16,
+        'stroke-dasharray': Math.max(0, len - 2) + ' ' + (C - Math.max(0, len - 2)), 'stroke-dashoffset': -off, transform: 'rotate(-90 66 66)', 'stroke-linecap': 'butt', class: 'ring' }));
+      off += len;
+    });
+    var t1 = svgEl('text', { x: 66, y: 64, 'text-anchor': 'middle', fill: '#fff', 'font-size': 17, 'font-weight': 700 }); t1.textContent = centerTop;
+    var t2 = svgEl('text', { x: 66, y: 82, 'text-anchor': 'middle', fill: 'rgba(255,255,255,.75)', 'font-size': 11 }); t2.textContent = centerBottom;
+    svg.appendChild(t1); svg.appendChild(t2);
+    var legend = el('div', { class: 'legend' }, parts.filter(function (x) { return x.value; }).map(function (x) {
+      return el('div', { class: 'legend__row' }, [el('span', { class: 'legend__dot', style: 'background:' + x.color }), el('span', { text: x.label }),
+        el('b', { class: 'num', text: money(x.value) + (total ? ' · ' + Math.round(x.value / total * 100) + '%' : '') })]);
+    }));
+    return el('div', { class: 'donut' }, [svg, legend]);
+  }
+
   // ---------- сервер ----------
 
   // ---------- связь: запросы с тайм-аутом ----------
