@@ -40,5 +40,15 @@ var Tg = (function () {
     return sign + s + ' ₸';
   }
 
-  return { call: call, send: send, esc: esc, money: money };
+  /** Фото в чат (multipart): чек клиенту, карточка дня. */
+  function sendPhoto(chatId, blob, caption) {
+    var res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token() + '/sendPhoto', {
+      method: 'post', payload: { chat_id: String(chatId), caption: caption || '', photo: blob }, muteHttpExceptions: true
+    });
+    var body = JSON.parse(res.getContentText() || '{}');
+    if (!body.ok) throw new Error('Telegram sendPhoto: ' + (body.description || res.getResponseCode()));
+    return body.result;
+  }
+
+  return { call: call, send: send, sendPhoto: sendPhoto, esc: esc, money: money };
 })();

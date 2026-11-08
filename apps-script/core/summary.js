@@ -179,7 +179,26 @@ var Summary = (function () {
     }).filter(function (x) { return x.debt > 0; }).sort(function (a, b) { return b.debt - a.debt; });
   }
 
-  return { period: period, stock: stock, debtors: debtors, months: months };
+  /** Итог дня для карточки: выручка, чеки, прибыль дня, касса сошлась ли, лучшая позиция. */
+  function day(view, date) {
+    var s = period(view, date, date);
+    var shifts = view.rows('shifts').filter(function (x) { return x.shift_date === date; });
+    var closed = shifts.filter(function (x) { return x.status === 'closed'; });
+    var ids = {};
+    shifts.forEach(function (x) { ids[x.shift_id] = true; });
+    var sold = {};
+    view.rows('stock_moves').forEach(function (m) { if (m.type === 'sale' && ids[m.shift_id]) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty; });
+    var top = Object.keys(sold).sort(function (a, b) { return sold[b] - sold[a]; })[0];
+    var it = top ? view.item(top) : null;
+    return {
+      date: date, shifts: shifts.length, revenue: s.revenue, receipts: s.receipts, avg_check: s.avg_check,
+      cash_diff: closed.reduce(function (a, x) { return a + (x.cash_diff || 0); }, 0),
+      all_closed: shifts.length > 0 && closed.length === shifts.length,
+      top_item: it ? { item_id: it.item_id, name: it.name, category: it.category, qty: sold[top] } : null
+    };
+  }
+
+  return { period: period, stock: stock, debtors: debtors, months: months, day: day };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Summary;

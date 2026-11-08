@@ -322,3 +322,7 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 .done__title { font-size: 36px; margin-top: 8px; }
 .done__sum { font-size: 34px; font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .done__check, .kp__panel { animation: none; } }
+
+/* Рисунки цветов вместо значков. */
+.ico--art { background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .25); padding: 0; overflow: hidden; }
+.ico--art img { width: 34px; height: 34px; display: block; }

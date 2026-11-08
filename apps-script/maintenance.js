@@ -123,8 +123,25 @@ function backup_(ss, now) {
   return 'Копия: «' + name + '», всего копий ' + (all.length - old.length) + (old.length ? ', старых в корзину: ' + old.length : '');
 }
 
-/** Утренняя проверка бота: вебхук без ошибок и очереди, ошибки за сутки. */
+/** Утро владелицы: итог вчерашнего дня одной строкой и приглашение к карточке дня. */
+function morningCard_() {
+  var store = SheetsStore.open();
+  var now = nowIso();
+  var yesterday = new Date(Date.parse(now.slice(0, 10) + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+  store.rows('staff').filter(function (s) { return s.role === 'owner' && s.active === true && s.telegram_id; }).forEach(function (o) {
+    var view = Ops.makeView(store, { client_id: o.client_id, point_id: o.point_id, staff_id: o.staff_id, role: 'owner', now: now });
+    var d = Summary.day(view, yesterday);
+    if (!d.shifts) return;
+    var cash = !d.all_closed ? 'смена не закрыта' : d.cash_diff === 0 ? 'касса сошлась' : 'расхождение кассы ' + Tg.money(d.cash_diff);
+    var top = d.top_item ? ' · лучшая позиция — ' + Tg.esc(d.top_item.name) : '';
+    Tg.send(o.telegram_id, '🌸 Доброе утро! Вчера: <b>' + Tg.money(d.revenue) + '</b> · чеков ' + d.receipts + ' · ' + cash + top +
+      '.\nКарточка дня — в «Кассе» → «Сегодня».');
+  });
+}
+
+/** Утренняя проверка бота: вебхук без ошибок и очереди, ошибки за сутки. Заодно — утреннее сообщение владелице. */
 function healthCheck() {
+  try { morningCard_(); } catch (eM) { Logger.log('Утреннее сообщение: ' + eM.message); }
   var problems = [];
   try {
     var info = Tg.call('getWebhookInfo');

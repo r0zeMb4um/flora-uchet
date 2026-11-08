@@ -32,6 +32,15 @@
   }
   function icon(name, cls) { return el('i', { class: 'ti ti-' + name + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' }); }
   function catIcon(category) { return el('span', { class: 'ico', 'aria-hidden': 'true' }, [icon(CAT_ICON[category] || 'flower')]); }
+  /** Рисунок позиции: цветы — по названию (роза, тюльпан, пион, ранункулюс), зелень — эвкалипт, остальное — значок. */
+  function itemArt(c) {
+    var n = String(c.name || '').toLowerCase();
+    var art = null;
+    if (c.category === 'greens') art = 'eucalyptus';
+    else if (c.category === 'flowers') art = /роз/.test(n) ? 'rose' : /тюльпан/.test(n) ? 'tulip' : /пион/.test(n) ? 'peony' : 'ranunculus';
+    if (!art) return catIcon(c.category);
+    return el('span', { class: 'ico ico--art', 'aria-hidden': 'true' }, [el('img', { src: 'img/flowers/' + art + '.svg', width: '34', height: '34', alt: '' })]);
+  }
   function firstName(name) { return String(name || '').replace(/\s*\(.*\)\s*$/, ''); }
   function greeting() {
     var h = new Date(Date.now() + 5 * 3600000).getUTCHours(); // время Алматы
@@ -177,6 +186,133 @@
     document.body.appendChild(box);
     setTimeout(function () { box.classList.add('done--out'); }, 1100);
     setTimeout(function () { box.remove(); }, 1400);
+  }
+
+  // ---------- картинки для пересылки: чек клиенту и карточка дня ----------
+
+  function loadImg(src) {
+    return new Promise(function (ok, fail) { var i = new Image(); i.onload = function () { ok(i); }; i.onerror = fail; i.src = src; });
+  }
+  function rrect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  var SCRIPT = 'italic 600 {px}px "Cormorant Garamond", Georgia, serif';
+  var SANS = '{w} {px}px Manrope, Arial, sans-serif';
+  function font(tpl, px, w) { return tpl.replace('{px}', px).replace('{w}', w || 600); }
+
+  /** Фон и шапка в фирменном стиле. Возвращает canvas и контекст. */
+  function brandCanvas(h, shopName, logo) {
+    var c = document.createElement('canvas');
+    c.width = 1080; c.height = h;
+    var g = c.getContext('2d');
+    var bg = g.createLinearGradient(0, 0, 1080, h);
+    bg.addColorStop(0, '#163940'); bg.addColorStop(.55, '#24545d'); bg.addColorStop(1, '#4f8790');
+    g.fillStyle = bg; g.fillRect(0, 0, 1080, h);
+    [[960, 140, 360, 'rgba(247,168,196,.95)'], [60, h - 80, 460, 'rgba(242,182,201,.9)'], [1040, h * 0.62, 220, 'rgba(252,214,226,.7)']].forEach(function (b) {
+      var rg = g.createRadialGradient(b[0], b[1], 0, b[0], b[1], b[2]);
+      rg.addColorStop(0, b[3]); rg.addColorStop(.45, 'rgba(224,80,126,.45)'); rg.addColorStop(1, 'rgba(224,80,126,0)');
+      g.fillStyle = rg; g.fillRect(0, 0, 1080, h);
+    });
+    g.drawImage(logo, 64, 52, 132, 132);
+    g.fillStyle = '#fff'; g.font = font(SCRIPT, 76); g.textBaseline = 'alphabetic';
+    g.fillText(shopName, 214, 132);
+    g.font = font(SANS, 22, 600); g.globalAlpha = .85;
+    g.fillText('Ц В Е Т О Ч Н А Я   К А С С А', 218, 172); g.globalAlpha = 1;
+    return { c: c, g: g };
+  }
+  function glass(g, x, y, w, h) {
+    rrect(g, x, y, w, h, 44);
+    g.fillStyle = 'rgba(18,48,54,.38)'; g.fill();
+    g.fillStyle = 'rgba(255,255,255,.14)'; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.stroke();
+    g.fillStyle = '#fff'; // текст после стекла — снова белый
+  }
+  function fit(g, text, maxW) {
+    var t = String(text);
+    while (t.length > 3 && g.measureText(t).width > maxW) t = t.slice(0, -2);
+    return t === String(text) ? t : t.slice(0, -1) + '…';
+  }
+  function ready() {
+    var f = document.fonts;
+    return Promise.all([f ? f.load(font(SCRIPT, 60)) : 0, f ? f.load(font(SANS, 40, 700)) : 0, f ? f.load(font(SANS, 30, 500)) : 0,
+      loadImg('img/ranunculus.svg')]).then(function (x) { return x[3]; });
+  }
+
+  /** Чек для покупателя (не фискальный). */
+  function drawReceipt(sale) {
+    return ready().then(function (logo) {
+      var lines = sale.items.slice(0, 8);
+      var h = 1350;
+      var k = brandCanvas(h, sale.shop, logo);
+      var g = k.g;
+      glass(g, 64, 230, 952, 1000);
+      g.fillStyle = '#fff'; g.font = font(SCRIPT, 72); g.fillText('Спасибо за покупку!', 112, 340);
+      g.font = font(SANS, 30, 500); g.globalAlpha = .85; g.fillText(sale.when + (sale.type === 'bouquet' ? ' · букет' : ''), 116, 392); g.globalAlpha = 1;
+      var y = 470;
+      g.font = font(SANS, 36, 600);
+      lines.forEach(function (l) {
+        g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(fit(g, l.name, 720), 116, y);
+        g.textAlign = 'right'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText('× ' + l.qty, 964, y);
+        y += 58;
+      });
+      if (sale.items.length > lines.length) { g.textAlign = 'left'; g.fillText('и ещё ' + (sale.items.length - lines.length) + ' поз.', 116, y); y += 58; }
+      g.textAlign = 'left';
+      g.strokeStyle = 'rgba(255,255,255,.3)'; g.setLineDash([10, 10]); g.beginPath(); g.moveTo(116, y); g.lineTo(964, y); g.stroke(); g.setLineDash([]);
+      y += 64;
+      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
+      if (sale.discount) { g.fillText('Скидка', 116, y); g.textAlign = 'right'; g.fillText('− ' + money(sale.discount), 964, y); g.textAlign = 'left'; y += 56; }
+      g.fillStyle = '#fff'; g.font = font(SANS, 40, 700); g.fillText('Итого', 116, y + 40);
+      g.textAlign = 'right'; g.font = font(SANS, 92, 700); g.fillText(money(sale.total), 964, y + 50); g.textAlign = 'left';
+      y += 120;
+      g.font = font(SANS, 32, 500); g.fillStyle = 'rgba(255,255,255,.85)';
+      g.fillText('Оплата: ' + sale.how, 116, y);
+      g.font = font(SCRIPT, 56); g.fillStyle = '#fcd6e2'; g.fillText('Ждём вас снова!', 116, 1150);
+      g.font = font(SANS, 22, 500); g.fillStyle = 'rgba(255,255,255,.7)'; g.fillText('Это не кассовый чек — фискальный чек выдаёт касса магазина.', 116, 1300);
+      g.drawImage(logo, 840, 1040, 150, 150);
+      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    });
+  }
+
+  /** Карточка дня для владелицы. */
+  function drawDayCard(day, shop) {
+    return Promise.all([ready(), day.top_item ? loadImg('img/flowers/' + artName(day.top_item) + '.svg').catch(function () { return null; }) : null]).then(function (x) {
+      var logo = x[0], topArt = x[1];
+      var k = brandCanvas(1350, shop, logo);
+      var g = k.g;
+      var d = day.date.split('-').reverse().join('.');
+      g.fillStyle = '#fff'; g.font = font(SCRIPT, 84); g.fillText('Вчера, ' + d.slice(0, 5), 96, 330);
+      glass(g, 64, 380, 952, 330);
+      g.font = font(SANS, 34, 600); g.globalAlpha = .85; g.fillText('Выручка', 116, 460); g.globalAlpha = 1;
+      g.font = font(SANS, 132, 700); g.fillText(money(day.revenue), 112, 600);
+      g.font = font(SANS, 32, 500); g.globalAlpha = .85; g.fillText('чеков ' + day.receipts + ' · средний чек ' + money(day.avg_check), 116, 670); g.globalAlpha = 1;
+      glass(g, 64, 740, 952, 150);
+      var clean = day.all_closed && day.cash_diff === 0;
+      g.font = font(SANS, 44, 700); g.fillStyle = clean ? '#9fe8c0' : '#ffd27a';
+      g.fillText(!day.all_closed ? 'Смена не закрыта' : clean ? '✓ Касса сошлась до тенге' : 'Расхождение кассы ' + money(day.cash_diff), 116, 832);
+      if (day.top_item) {
+        glass(g, 64, 920, 952, 230);
+        if (topArt) g.drawImage(topArt, 100, 950, 170, 170);
+        g.fillStyle = '#fff'; g.font = font(SANS, 30, 600); g.globalAlpha = .85; g.fillText('Лучшая позиция дня', 300, 1010); g.globalAlpha = 1;
+        g.font = font(SCRIPT, 64); g.fillText(fit(g, day.top_item.name, 680), 300, 1080);
+        g.font = font(SANS, 30, 500); g.fillText(day.top_item.qty + ' шт', 300, 1126);
+      }
+      g.font = font(SCRIPT, 54); g.fillStyle = '#fcd6e2'; g.fillText('Хорошего дня!', 96, 1260);
+      return k.c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    });
+  }
+  function artName(c) {
+    var n = String(c.name || '').toLowerCase();
+    if (c.category === 'greens') return 'eucalyptus';
+    return /роз/.test(n) ? 'rose' : /тюльпан/.test(n) ? 'tulip' : /пион/.test(n) ? 'peony' : 'ranunculus';
+  }
+
+  /** Нарисовать и прислать себе в чат с ботом. */
+  function shareImage(draw, caption, okText) {
+    toast('Рисуем картинку…');
+    return draw().then(function (b64) { return api({ action: 'send_image', image: b64, caption: caption }); })
+      .then(function () { haptic('success'); toast(okText); })
+      .catch(function (e) { haptic('error'); toast(e && e.message ? e.message : 'Не получилось отправить картинку', true); });
   }
 
   function uuid() {
@@ -410,6 +546,15 @@
       ]));
       nodes.push(el('button', { class: 'btn btn--primary btn--action', onclick: function () { state.screen = 'sale'; render(); } }, [
         icon('shopping-cart'), 'Новая продажа']));
+      if (state.lastSale) {
+        var ls = state.lastSale;
+        nodes.push(el('div', { class: 'card' }, [
+          el('div', { class: 'sum' }, [el('span', { class: 'muted', text: 'Последняя продажа' }), el('b', { class: 'num', text: money(ls.total) })]),
+          el('button', { class: 'btn', onclick: function () {
+            shareImage(function () { return drawReceipt(ls); }, 'Чек для покупателя · ' + money(ls.total), 'Чек пришёл вам в чат с ботом — перешлите клиенту');
+          } }, [icon('photo'), 'Чек клиенту картинкой'])
+        ]));
+      }
     }
     app.replaceChildren.apply(app, nodes);
   }
@@ -469,7 +614,7 @@
       if (low) badges.push(el('span', { class: 'badge badge--low', text: 'мало · ' + c.stock }));
       if (c.review) badges.push(el('span', { class: 'badge badge--new', text: 'новое' }));
       return el('div', { class: 'tile' + (qty ? ' tile--on' : '') + (short ? ' tile--short' : '') }, [
-        el('div', { class: 'tile__head' }, [catIcon(c.category), el('div', { class: 'tile__name', text: c.name })]),
+        el('div', { class: 'tile__head' }, [itemArt(c), el('div', { class: 'tile__name', text: c.name })]),
         badges.length ? el('div', { class: 'badges' }, badges) : null,
         el('div', { class: 'tile__meta num', text: money(c.price) + ' · остаток ' + c.stock }),
         short ? el('div', { class: 'short' }, [
@@ -1060,7 +1205,7 @@
       el('div', { class: 'card' }, list.map(function (c) {
         var low = c.stock < c.min;
         return el('div', { class: 'item' }, [
-          catIcon(c.category),
+          itemArt(c),
           el('div', { class: 'item__main' }, [el('div', { style: 'font-weight:600', text: c.name }),
             el('div', { class: 'muted num', style: 'font-size:13px', text: money(c.price) + ' · ' + c.stock + ' шт' + (c.review ? ' · на проверке' : '') })]),
           el('span', { class: 'status ' + (low ? 'status--low' : 'status--ok'), text: low ? 'Мало · мин. ' + c.min : 'Есть' })
@@ -1235,6 +1380,19 @@
       var r = d.shift;
       var nodes = [ownerTabs()];
       if (d.alerts.length) nodes.push(el('div', { class: 'card card--note' }, d.alerts.map(function (a) { return el('div', { text: '⚠️ ' + a }); })));
+      var y = d.yesterday;
+      if (y && y.shifts) {
+        var cleanY = y.all_closed && y.cash_diff === 0;
+        nodes.push(el('div', { class: 'card' }, [
+          el('div', { class: 'sum' }, [el('span', { class: 'script', style: 'font-size:24px', text: 'Вчера' }), numEl(y.revenue, true)]),
+          el('div', { class: 'muted', text: 'чеков ' + y.receipts + ' · ' + (!y.all_closed ? 'смена не закрыта' : cleanY ? 'касса сошлась' : 'расхождение ' + money(y.cash_diff)) +
+            (y.top_item ? ' · лучшая позиция — ' + y.top_item.name : '') }),
+          el('button', { class: 'btn', onclick: function () {
+            shareImage(function () { return drawDayCard(y, (d.shop && d.shop.name) || 'Флора·Учёт'); }, 'Карточка дня · ' + y.date.split('-').reverse().join('.'),
+              'Карточка дня пришла вам в чат — её можно переслать');
+          } }, [icon('sparkles'), 'Карточка дня картинкой'])
+        ]));
+      }
       if (!r) nodes.push(emptyState('Смена не открыта', 'Как только флорист откроет смену, здесь будут выручка и касса в реальном времени.'));
       else {
         nodes.push(el('div', { class: 'row' }, [el('h1', { class: 'h1', text: 'Смена №' + r.shift_no }), el('div', { class: 'muted', text: r.florists.join(', ') })]));
@@ -1454,6 +1612,14 @@
         var how = { cash: 'наличными', card: 'безналом', mixed: 'нал + безнал', debt: 'в долг' }[d.pay] || '';
         var change = d.pay === 'cash' && d.given && Number(d.given) > res.result.total ? ' · сдача ' + money(Number(d.given) - res.result.total) : '';
         showDone(res.result.total, (d.type === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + how + change, res.status === 'already');
+        var names = {};
+        (state.data.catalog || []).forEach(function (c) { names[c.item_id] = c.name; });
+        state.lastSale = {
+          shop: (state.data.shop && state.data.shop.name) || 'Флора·Учёт', type: d.type, how: how, total: res.result.total,
+          discount: sm.payload.price - res.result.total,
+          items: sm.payload.items.map(function (x) { return { name: names[x.item_id] || x.item_id, qty: x.qty }; }),
+          when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16).replace('T', ' ').split(' ').map(function (v, i) { return i ? v : v.split('-').reverse().join('.'); }).join(' · ')
+        };
         state.shortage = null;
         state.screen = 'main';
       })

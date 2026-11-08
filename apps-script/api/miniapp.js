@@ -88,7 +88,9 @@ var MiniApi = (function () {
     });
     var hits = Object.keys(sold).filter(function (id) { return sold[id] > 0; })
       .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 3);
-    return { me: { name: staff.name, role: staff.role }, shift: shiftInfo, catalog: catalog, templates: templates, hits: hits,
+    var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
+    return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
+      shift: shiftInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
 
@@ -135,7 +137,10 @@ var MiniApi = (function () {
     if (rep && rep.cancelled_count) alerts.push('Отменено чеков: ' + rep.cancelled_count);
     var review = view.rows('catalog').filter(function (c) { return c.status === 'review'; }).length;
     if (review) alerts.push('Новых позиций на проверке: ' + review + ' (чат → «Каталог»)');
-    return { me: { name: staff.name, role: staff.role }, shift: rep, names: names(view), below_min: st.below, alerts: alerts };
+    var yesterday = new Date(Date.parse(now.slice(0, 10) + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+    var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
+    return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
+      shift: rep, names: names(view), below_min: st.below, alerts: alerts, yesterday: Summary.day(view, yesterday) };
   }
 
   function ownerShifts(store, staff, now, limit) {
@@ -215,6 +220,12 @@ var MiniApi = (function () {
     var staff = staffOf(store, telegramId);
     if (body.action === 'bootstrap') return { data: bootstrap(store, staff, now), notify: [] };
     if (String(body.action).indexOf('owner_') === 0) return { data: ownerDispatch(store, staff, body, now), notify: [] };
+    if (body.action === 'send_image') {
+      // Картинка (чек клиенту, карточка дня) приходит самому сотруднику в чат с ботом — оттуда её пересылают.
+      var b64 = String(body.image || '');
+      if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 3000000) throw apiError('BAD_INPUT', 'Картинка не получилась — попробуйте ещё раз');
+      return { data: { sent: true }, notify: [], photo: { chat_id: staff.telegram_id, base64: b64, caption: String(body.caption || '').slice(0, 900) } };
+    }
     if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
     if (body.action === 'close_preview') {
       // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
@@ -254,6 +265,10 @@ var MiniApi = (function () {
       var auth = Auth.verifyGas(data.initData);
       store = SheetsStore.open();
       var out = dispatch(store, auth.user.id, data, nowIso());
+      if (out.photo) {
+        var blob = Utilities.newBlob(Utilities.base64Decode(out.photo.base64), 'image/jpeg', 'flora.jpg');
+        Tg.sendPhoto(out.photo.chat_id, blob, out.photo.caption);
+      }
       if (out.notify.length) {
         try { Webhook.notify(store, out.client_id, out.notify); } catch (ignore) { /* уведомление не ломает продажу */ }
       }
