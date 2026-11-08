@@ -865,6 +865,7 @@
 
   var NAV_OF = {
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
+    cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
     owner_period: 'owner_period', owner_debtors: 'owner_debtors',
     owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
@@ -907,7 +908,25 @@
     app.replaceChildren(el('div', { class: 'card card--note' }, [el('div', { text: text })]));
   }
 
+  /** Перерисовка с сохранением курсора: поле, в котором печатают, не должно терять фокус (клавиатура на телефоне не закрывается). */
   function render() {
+    var ae = document.activeElement;
+    var idx = -1, ss = null, se = null;
+    if (ae && app.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) {
+      idx = Array.prototype.indexOf.call(app.querySelectorAll('input,textarea'), ae);
+      try { ss = ae.selectionStart; se = ae.selectionEnd; } catch (e) { /* у type=time/number выделения нет */ }
+    }
+    renderNow();
+    if (idx >= 0) {
+      var again = app.querySelectorAll('input,textarea')[idx];
+      if (again && again !== document.activeElement) {
+        again.focus();
+        try { if (ss !== null) again.setSelectionRange(ss, se); } catch (e) { /* не страшно */ }
+      }
+    }
+  }
+
+  function renderNow() {
     if (!state.data) return;
     if (state.screen === 'sale') renderSale();
     else if (state.screen === 'close') renderClose();
@@ -988,12 +1007,16 @@
       el('div', { class: 'grid2' }, [
         el('button', { class: 'btn btn--tile', onclick: go('income') }, [icon('truck-delivery'), 'Приход']),
         el('button', { class: 'btn btn--tile', onclick: go('defect') }, [icon('flower-off'), 'Брак']),
-        el('button', { class: 'btn btn--tile btn--wide', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат'])
+        el('button', { class: 'btn btn--tile', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат']),
+        el('button', { class: 'btn btn--tile', onclick: go('cancel') }, [icon('receipt-off'), 'Отмена продажи']),
+        el('button', { class: 'btn btn--tile', onclick: go('cashout') }, [icon('cash-banknote'), 'Расход']),
+        el('button', { class: 'btn btn--tile', onclick: go('repay') }, [icon('coin'), 'Погашение долга']),
+        el('button', { class: 'btn btn--tile btn--wide', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала из кассы'])
       ]),
       el('div', { class: 'more-end' }, [
         el('button', { class: 'btn btn--close', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену'])
       ]),
-      el('div', { class: 'muted center', text: 'Расход, «Владелица забрала», погашение долга и отмена продажи — кнопками в чате бота.' }));
+      null);
   };
 
   function renderSale() {
@@ -1621,6 +1644,121 @@
       chips([['arrived_bad', 'Пришло бракованным'], ['wilted', 'Завяло'], ['broken', 'Сломано'], ['gift', 'Подарок'], ['other', 'Другое']], f.reason,
         function (k) { f.reason = k; render(); }),
       linesEditor(f.lines, {}, upd));
+    upd();
+  };
+
+  // ---------- расход, изъятие, погашение долга, отмена продажи ----------
+
+  SCREENS.cashout = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.type === undefined) { f.type = 'delivery'; f.amount = ''; f.comment = ''; }
+    function upd() {
+      var a = intOf(f.amount);
+      mainButton(state.sending ? 'Записываем…' : 'Записать расход' + (a ? ' ' + money(a) : ''), !!a && a > 0 && !state.sending, function () {
+        submitOp('cash_out', { type: f.type, amount: a, comment: f.comment.trim() }, 'Расход записан');
+      });
+    }
+    app.replaceChildren(
+      title('Расход из кассы', 'Доставка, закупка мелочей — то, что заплатили из кассы'),
+      chips([['delivery', 'Доставка'], ['other', 'Прочее']], f.type, function (k) { f.type = k; render(); }),
+      formField('Сумма, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } })),
+      formField('На что (по желанию)', el('input', { class: 'input', value: f.comment, maxlength: '200', placeholder: 'например: такси до клиента', oninput: function (e) { f.comment = e.target.value; } }),
+        'Расход уменьшит расчёт кассы и будет виден владелице в отчёте смены.')
+    );
+    upd();
+  };
+
+  SCREENS.withdraw = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.amount === undefined) f.amount = '';
+    function upd() {
+      var a = intOf(f.amount);
+      mainButton(state.sending ? 'Записываем…' : 'Записать изъятие' + (a ? ' ' + money(a) : ''), !!a && a > 0 && !state.sending, function () {
+        askOk('Записать, что владелица забрала ' + money(a) + ' из кассы?', function () {
+          submitOp('withdrawal', { amount: a }, 'Изъятие записано');
+        });
+      });
+    }
+    app.replaceChildren(
+      title('Владелица забрала', 'Деньги из кассы в течение смены'),
+      formField('Сумма, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } }),
+        'Владелица сразу получит сообщение об этом изъятии.')
+    );
+    upd();
+  };
+
+  SCREENS.repay = function () {
+    backButton(true);
+    var f = state.form;
+    var debtors = (state.data.customers || []).filter(function (c) { return c.debt > 0; });
+    if (!f.customer) {
+      mainButton(null);
+      var q = (f.q || '').toLowerCase();
+      var list = debtors.filter(function (c) { return !q || c.name.toLowerCase().indexOf(q) >= 0; });
+      app.replaceChildren.apply(app, [
+        title('Погашение долга', 'Кто принёс деньги'),
+        debtors.length > 5 ? el('input', { class: 'search', placeholder: 'Поиск по имени', value: f.q || '', oninput: function (e) { f.q = e.target.value; render(); } }) : null
+      ].concat(list.length ? list.map(function (c) {
+        return el('button', { class: 'btn', style: 'text-align:left', onclick: function () { f.customer = c; f.amount = String(c.debt); f.method = 'cash'; render(); } }, [
+          el('div', { class: 'sum' }, [el('b', { text: c.name }), el('span', { class: 'num copper', text: money(c.debt) })]),
+          c.note ? el('div', { class: 'muted', text: c.note }) : null
+        ]);
+      }) : [emptyState('Должников нет', 'Все рассчитались.')]));
+      return;
+    }
+    var c = f.customer;
+    function upd() {
+      var a = intOf(f.amount);
+      var ok = a && a > 0 && a <= c.debt;
+      mainButton(state.sending ? 'Проводим…' : 'Принять ' + (a ? money(a) : ''), !!ok && !state.sending, function () {
+        submitOp('debt_repay', { customer_id: c.customer_id, method: f.method, amount: a }, 'Долг погашен');
+      });
+    }
+    app.replaceChildren(
+      title(c.name, 'Долг ' + money(c.debt)),
+      formField('Сколько принёс, ₸ (не больше ' + money(c.debt) + ')', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } })),
+      chips([['cash', 'Наличными'], ['card', 'Картой']], f.method, function (k) { f.method = k; render(); }),
+      el('button', { class: 'btn', onclick: function () { f.customer = null; render(); } }, 'Другой покупатель')
+    );
+    upd();
+  };
+
+  SCREENS.cancel = function () {
+    backButton(true);
+    var f = state.form;
+    if (!f.receipts) {
+      mainButton(null);
+      app.replaceChildren(title('Отмена продажи', 'Чеки текущей смены'), skeleton('list'));
+      api({ action: 'receipts', days: 2 }).then(function (list) { f.receipts = list.filter(function (r) { return r.cancellable; }); render(); })
+        .catch(function (e) { toast(e.message || 'Нет связи', true); });
+      return;
+    }
+    if (!f.receipt) {
+      mainButton(null);
+      app.replaceChildren.apply(app, [title('Отмена продажи', 'Выберите чек этой смены. Товар вернётся на склад.')].concat(f.receipts.length ? f.receipts.map(function (r) {
+        return el('button', { class: 'btn', style: 'text-align:left', onclick: function () { f.receipt = r; f.reason = ''; render(); } }, [
+          el('div', { class: 'sum' }, [el('span', { text: '№' + r.receipt_no + ' · ' + String(r.created_at).slice(11, 16) + (r.type === 'bouquet' ? ' · букет' : '') }), el('b', { class: 'num', text: money(r.total) })])
+        ]);
+      }) : [emptyState('Отменять нечего', 'В этой смене нет чеков, которые можно отменить. После возврата или замены отмена невозможна, предзаказ отменяет владелица.')]));
+      return;
+    }
+    var r = f.receipt;
+    function upd() {
+      var ok = f.reason.trim().length >= 3;
+      mainButton(state.sending ? 'Отменяем…' : 'Отменить чек №' + r.receipt_no, ok && !state.sending, function () {
+        askOk('Отменить чек №' + r.receipt_no + ' на ' + money(r.total) + '? Владелица получит сообщение.', function () {
+          submitOp('cancel', { receipt_id: r.receipt_id, reason: f.reason.trim() }, 'Чек отменён');
+        });
+      });
+    }
+    app.replaceChildren(
+      title('Чек №' + r.receipt_no, money(r.total)),
+      formField('Причина отмены', el('input', { class: 'input', value: f.reason, maxlength: '200', placeholder: 'например: ошибся с позицией', oninput: function (e) { f.reason = e.target.value; upd(); } }),
+        'Обязательно: причина попадёт в отчёт владелице.'),
+      el('button', { class: 'btn', onclick: function () { f.receipt = null; render(); } }, 'Другой чек')
+    );
     upd();
   };
 

@@ -12,7 +12,8 @@ var MiniApi = (function () {
   var FLORIST_KINDS = {
     sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
     preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
-    inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true
+    inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true,
+    debt_repay: true, cancel: true
   };
 
   function apiError(code, message) {
@@ -99,13 +100,18 @@ var MiniApi = (function () {
     var view = Ops.makeView(store, ctxOf(staff, now));
     var since = new Date(Date.parse(now) - (days || 7) * 86400000).toISOString().slice(0, 10);
     var pays = view.rows('payments');
+    var open = view.openShift();
+    var replaced = {};
+    view.rows('stock_moves').forEach(function (m) { if (m.type === 'replace') replaced[m.receipt_id] = true; });
     return view.rows('receipts').filter(function (r) { return r.status === 'posted' && String(r.created_at).slice(0, 10) >= since; })
       .map(function (r) {
         var paid = 0;
         var refunded = 0;
         pays.forEach(function (p) { if (p.receipt_id === r.receipt_id) { if (p.kind === 'refund') refunded += p.amount; else paid += p.amount; } });
+        // «Можно отменить»: чек текущей смены, не предзаказ, без возвратов и замен (остальное проверит сервер).
         return { receipt_id: r.receipt_id, receipt_no: r.receipt_no, type: r.type, total: r.total, created_at: r.created_at,
-          refundable: Math.max(0, paid - refunded) };
+          refundable: Math.max(0, paid - refunded),
+          cancellable: !!open && r.shift_id === open.shift_id && r.type !== 'preorder' && refunded === 0 && !replaced[r.receipt_id] };
       })
       .sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1; })
       .slice(0, 100);

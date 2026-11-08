@@ -131,3 +131,46 @@ test('расходы месяца: список, итог, исправлени�
   assert.throws(() => post(1, 'settings_edit', { reminder_time: '25:99' }), { code: 'BAD_INPUT' });
   assert.throws(() => call(777, { action: 'owner_settings' }), { code: 'FORBIDDEN' });
 });
+
+// ---------- этап 3: «Ещё» флориста — расход, изъятие, погашение долга, отмена продажи ----------
+
+function openedShop() {
+  const s = shop();
+  s.seedPost(s.owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 50 }] });
+  s.seedPost({ client_id: 'c1', point_id: 'p1', staff_id: 's_anna', role: 'florist', now: NOW }, 'open_shift', { florist_ids: ['s_anna'], open_cash: 0 });
+  return s;
+}
+
+test('флорист из кассы: расход, изъятие (владелице уведомление) — проходят; владелица этих операций не делает', () => {
+  const { post } = openedShop();
+  assert.ok(post(777, 'cash_out', { type: 'delivery', amount: 700, comment: 'такси' }));
+  const w = post(777, 'withdrawal', { amount: 5000 });
+  assert.ok(w.notify.some((n) => n.kind === 'withdrawal' && n.amount === 5000));
+  assert.throws(() => post(777, 'cash_out', { type: 'rent', amount: 100 }), { code: 'BAD_INPUT' }, 'аренды в смене нет (D11)');
+  assert.throws(() => post(1, 'cash_out', { type: 'other', amount: 100 }), { code: 'FORBIDDEN' });
+});
+
+test('погашение долга флористом: не больше долга, касса и долг меняются', () => {
+  const { call, post } = openedShop();
+  post(777, 'sale', { items: [{ item_id: 'rose', qty: 2 }], price: 2400, payments: [{ method: 'cash', amount: 400 }], debt_customer: { new_customer: { name: 'Иванов', confirm_new: true } } });
+  const ivan = call(777, { action: 'bootstrap' }).customers.find((c) => c.name === 'Иванов');
+  assert.equal(ivan.debt, 2000);
+  assert.throws(() => post(777, 'debt_repay', { customer_id: ivan.customer_id, method: 'cash', amount: 2001 }));
+  post(777, 'debt_repay', { customer_id: ivan.customer_id, method: 'card', amount: 1500 });
+  assert.equal(call(777, { action: 'bootstrap' }).customers.find((c) => c.name === 'Иванов').debt, 500);
+});
+
+test('отмена продажи флористом: в списке «можно отменить» только чек текущей смены без возвратов; товар возвращается', () => {
+  const { call, post } = openedShop();
+  const a = post(777, 'sale', { items: [{ item_id: 'rose', qty: 3 }], price: 3600, payments: [{ method: 'cash', amount: 3600 }] });
+  const b = post(777, 'sale', { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [{ method: 'cash', amount: 1200 }] });
+  post(777, 'refund', { receipt_id: b.data.result.receipt_id, mode: 'money', amount: 200, method: 'cash' });
+  const list = call(777, { action: 'receipts', days: 2 });
+  assert.equal(list.find((r) => r.receipt_id === a.data.result.receipt_id).cancellable, true);
+  assert.equal(list.find((r) => r.receipt_id === b.data.result.receipt_id).cancellable, false, 'после возврата отмена невозможна');
+  assert.throws(() => post(777, 'cancel', { receipt_id: b.data.result.receipt_id, reason: 'ошибка' }), { code: 'HAS_REFUNDS' });
+  const c = post(777, 'cancel', { receipt_id: a.data.result.receipt_id, reason: 'ошибся с позицией' });
+  assert.ok(c.notify.some((n) => n.kind === 'cancel'));
+  assert.equal(call(777, { action: 'bootstrap' }).catalog.find((x) => x.item_id === 'rose').stock, 49); // 50 − 1 (чек b)
+  assert.throws(() => post(777, 'cancel', { receipt_id: a.data.result.receipt_id, reason: 'ещё раз' }), { code: 'UNKNOWN_RECEIPT' });
+});
