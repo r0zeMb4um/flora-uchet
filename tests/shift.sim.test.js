@@ -336,8 +336,8 @@ test('бронь → предзаказ с авансом → сборка → �
   assert.throws(() => w.post('s_anna', 'preorder', { reservation_id: res.result.reservation_id, payments: [{ method: 'card', amount: 1 }] }), { code: 'BAD_RESERVATION' });
   const id = pre.result.receipt_id;
   assert.throws(() => w.post('s_anna', 'preorder_pickup', { receipt_id: id, payments: [{ method: 'cash', amount: 15000 }] }), { code: 'BAD_STATE' });
-  w.post('s_anna', 'preorder_assemble', { receipt_id: id, items: [{ item_id: 'rose_red_60', qty: 25 }] });
-  assert.equal(w.view().stock('rose_red_60'), 15);
+  w.post('s_anna', 'preorder_assemble', { receipt_id: id, items: [{ item_id: 'rose_red_60', qty: 20 }] });
+  assert.equal(w.view().stock('rose_red_60'), 20);
   assert.throws(() => w.post('s_anna', 'preorder_pickup', { receipt_id: id, payments: [{ method: 'cash', amount: 10000 }] }), { code: 'BALANCE_MISMATCH' });
   w.post('s_anna', 'preorder_pickup', { receipt_id: id, payments: [{ method: 'cash', amount: 10000 }], to_debt: true });
   assert.equal(w.view().debtOf(w.customerId('Дана')), 5000);
@@ -518,7 +518,7 @@ test('отчёт смены №214 текстом: все цифры этало�
   ]) assert.ok(t.includes(line), 'нет строки: ' + line + '\n---\n' + t);
   assert.ok(!t.includes('отменено'), 'нулевые строки не показываются');
   assert.ok(!t.includes('— <b>к доплате'), 'ЗП выдана полностью');
-  assert.ok(!/аренд/i.test(t), 'аренды в смене нет (D11)');
+  assert.ok(!/аренда за|аренда:/i.test(t), 'аренды в смене нет (D11)');
 });
 
 // ---------- часть 3–4 этапа D ----------

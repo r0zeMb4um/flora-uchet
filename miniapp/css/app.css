@@ -433,3 +433,7 @@ body.on-sale #app .input, body.on-sale #app .search { font-size: 14px; }
 .btn--close i.ti { color: #ffb3b3; }
 @media (prefers-reduced-motion: reduce) { .screen.enter > * { animation: none; } }
 .btn--wide { justify-content: flex-start; }
+
+.ctl { padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .1); font-size: 14px; }
+.ctl:first-of-type { border-top: 0; }
+.ctl--below_catalog, .ctl--cancel, .ctl--refund { color: #ffd0d0; }

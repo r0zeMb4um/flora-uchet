@@ -243,6 +243,9 @@ var Notify = {
     }
     if (n.kind === 'withdrawal') return '💸 Из кассы забрали ' + Tg.money(n.amount) + ' (изъятие владелицей).';
     if (n.kind === 'cancel') return '↩️ Отменён чек на ' + Tg.money(n.total) + '. Причина: ' + Tg.esc(n.reason);
+    if (n.kind === 'refund') return '↩️ Возврат денег ' + Tg.money(n.amount) + ' по чеку №' + n.receipt_no + ' (чек на ' + Tg.money(n.total) + ').';
+    if (n.kind === 'defect') return '🥀 Брак на ' + Tg.money(n.cost) + ' по закупке (' + n.qty + ' шт).';
+    if (n.kind === 'pay_adjust') return '💵 Доплата ЗП из кассы: ' + Tg.esc(n.name) + ' — ' + Tg.money(n.amount) + '.';
     if (n.kind === 'new_item') return '🆕 Флорист добавил позицию «' + Tg.esc(n.name) + '» — на проверке.';
     return '';
   }

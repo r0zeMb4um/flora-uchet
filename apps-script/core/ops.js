@@ -394,7 +394,16 @@ var Ops = (function () {
   H.preorder_assemble = function (view, p, plan) {
     requireShift(view, plan);
     var r = preorderReceipt(view, p.receipt_id, 'waiting');
-    moveStock(plan, view, list(p.items, 'состав'), 'sale', { sign: -1, receipt_id: r.receipt_id });
+    var comp = list(p.items, 'состав');
+    // D28: состав по каталожным ценам не дороже цены заказа.
+    var compSum = comp.reduce(function (a, l) {
+      var it = view.item(l.item_id);
+      return a + posInt(l.qty, 'количество') * (it ? (it.sale_price || 0) : 0);
+    }, 0);
+    if (compSum > r.price) {
+      throw opsError('ASSEMBLY_TOO_EXPENSIVE', 'Состав на ' + tenge(compSum) + ', заказ на ' + tenge(r.price) + '. Уберите лишнее или попросите владелицу изменить заказ');
+    }
+    moveStock(plan, view, comp, 'sale', { sign: -1, receipt_id: r.receipt_id });
     update(plan, 'receipts', { receipt_id: r.receipt_id }, r, { assembly_status: 'assembled' });
     plan.result = { receipt_id: r.receipt_id };
   };
@@ -505,9 +514,11 @@ var Ops = (function () {
       return { item_id: l.item_id, qty: posInt(l.qty, 'количество'), reason: oneOf(l.reason, DEFECT_REASONS, 'причина') };
     });
     moveStock(plan, view, lines, 'defect', { sign: -1, allowHidden: true });
-    plan.result = {
-      cost: lines.reduce(function (a, l) { return a + C.lossCost(l.qty, view.item(l.item_id).last_cost); }, 0)
-    };
+    var lossTotal = lines.reduce(function (a, l) { return a + C.lossCost(l.qty, view.item(l.item_id).last_cost); }, 0);
+    if (lossTotal >= DEFECT_NOTIFY) {
+      plan.notify.push({ to: 'owner', kind: 'defect', cost: lossTotal, qty: lines.reduce(function (a, l) { return a + l.qty; }, 0) });
+    }
+    plan.result = { cost: lossTotal };
   };
 
   H.refund = function (view, p, plan) {
@@ -519,6 +530,7 @@ var Ops = (function () {
       var money = receiptMoney(view, r.receipt_id);
       C.checkRefund(money.paid, money.refunded, amount);
       addPayments(plan, view, [{ method: oneOf(p.method, ['cash', 'card'], 'способ возврата'), amount: amount }], 'refund', r.receipt_id);
+      plan.notify.push({ to: 'owner', kind: 'refund', amount: amount, receipt_no: r.receipt_no, total: r.total });
       plan.result = { receipt_id: r.receipt_id, refunded: amount };
     } else if (p.mode === 'replace') {
       // Вернувшиеся завядшие цветы на склад не приходуются (ТЗ).
@@ -620,6 +632,12 @@ var Ops = (function () {
     var shift = requireShift(view, plan);
     var s = view.staff(p.staff_id);
     if (!s || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет такого флориста');
+    var amountAdj = posInt(p.amount, 'сумма');
+    var owed = salaryOwed(view, s.staff_id);
+    if (amountAdj > owed) {
+      throw opsError('PAY_ADJUST_TOO_BIG', 'К доплате по ЗП у «' + s.name + '» — ' + tenge(Math.max(owed, 0)) + ', а вносится ' + tenge(amountAdj));
+    }
+    plan.notify.push({ to: 'owner', kind: 'pay_adjust', amount: amountAdj, name: s.name });
     add(plan, view, 'cash_ops', {
       cash_id: nextId(plan, 'co'), shift_id: shift.shift_id, type: 'pay_adjust',
       amount: posInt(p.amount, 'сумма'), staff_id: s.staff_id, comment: optText(p.comment, 'комментарий', 200)
@@ -648,6 +666,75 @@ var Ops = (function () {
   };
 
   /** Цифры смены по проведённым данным (без закрытия). */
+  var DEFECT_NOTIFY = 5000; // брак на эту сумму и больше (по закупке) — сразу сообщение владелице (D28)
+
+  /** «48 000 ₸» с неразрывным пробелом. */
+  function tenge(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0') + '\u00a0₸'; }
+
+  /** Сколько ЗП ещё не выдано флористу: начислено по закрытым сменам − выдано (ставка, процент, доплаты). */
+  function salaryOwed(view, staffId) {
+    var owed = 0;
+    view.rows('shifts').forEach(function (sh) {
+      if (sh.status !== 'closed') return;
+      var staff = view.shiftStaff(sh.shift_id);
+      if (!staff.some(function (x) { return x.staff_id === staffId; })) return;
+      var n = shiftNumbers(view, sh);
+      owed += C.payroll(n.revenue.revenue, staff).each[staffId].total;
+    });
+    view.rows('cash_ops').forEach(function (o) {
+      if (o.staff_id === staffId && (o.type === 'rate' || o.type === 'pct' || o.type === 'pay_adjust')) owed -= o.amount;
+    });
+    return owed;
+  }
+
+  /**
+   * Контроль смены (D28): всё, что владелице стоит увидеть глазами, — цены ниже каталога, скидки, отмены,
+   * возвраты, брак, расходы и доплаты, долги. Пусто — «замечаний нет».
+   */
+  function controlOf(view, shiftId, n, moves) {
+    var items = [];
+    var push = function (kind, text, amount) { items.push({ kind: kind, text: text, amount: amount || 0 }); };
+    n.receipts.forEach(function (r) {
+      if (r.status === 'cancelled') { push('cancel', 'Чек №' + r.receipt_no + ' отменён: ' + tenge(r.total), r.total); return; }
+      if (r.type === 'sale' || r.type === 'bouquet') {
+        var ref = 0;
+        view.rows('stock_moves').forEach(function (m) {
+          if (m.receipt_id === r.receipt_id && m.type === 'sale') ref += -m.qty * ((view.item(m.item_id) || {}).sale_price || 0);
+        });
+        if (ref && r.price < ref) push('below_catalog', 'Чек №' + r.receipt_no + ': цена ' + tenge(r.price) + ' при каталоге ' + tenge(ref) + ' (на ' + tenge(ref - r.price) + ' ниже)', ref - r.price);
+      }
+      if (r.discount_amount > 0) {
+        var how = r.discount_kind === 'pct' ? (r.discount_value / 100) + '%, ' : '';
+        push('discount', 'Чек №' + r.receipt_no + ': скидка ' + how + tenge(r.discount_amount), r.discount_amount);
+      }
+    });
+    n.payments.forEach(function (p) {
+      if (p.kind !== 'refund') return;
+      var rc = view.receipt(p.receipt_id);
+      push('refund', 'Возврат ' + tenge(p.amount) + (rc ? ' по чеку №' + rc.receipt_no : ''), p.amount);
+    });
+    var defectQty = 0, defectCost = 0;
+    moves.forEach(function (m) {
+      if (m.type !== 'defect') return;
+      defectQty += -m.qty;
+      defectCost += typeof m.cost_sum === 'number' ? m.cost_sum : C.lossCost(-m.qty, (view.item(m.item_id) || {}).last_cost || 0);
+    });
+    if (defectQty) push('defect', 'Брак: ' + defectQty + ' шт на ' + tenge(defectCost) + ' по закупке', defectCost);
+    n.cash_ops.forEach(function (o) {
+      var note = o.comment ? ' — ' + o.comment : '';
+      if (o.type === 'delivery') push('expense', 'Расход (доставка): ' + tenge(o.amount) + note, o.amount);
+      else if (o.type === 'other') push('expense', 'Расход (прочее): ' + tenge(o.amount) + note, o.amount);
+      else if (o.type === 'pay_adjust') push('pay_adjust', 'Доплата ЗП: ' + ((view.staff(o.staff_id) || {}).name || '') + ' ' + tenge(o.amount), o.amount);
+      else if (o.type === 'withdrawal_day') push('withdrawal', 'Изъятие из кассы: ' + tenge(o.amount), o.amount);
+    });
+    view.rows('debt_moves').forEach(function (m) {
+      if (m.shift_id !== shiftId || (m.type !== 'sale' && m.type !== 'pickup')) return;
+      var c = view.customer(m.customer_id);
+      push('debt', 'В долг: ' + tenge(m.amount) + (c ? ' — ' + c.name : ''), m.amount);
+    });
+    return { items: items, clean: items.length === 0 };
+  }
+
   function shiftNumbers(view, shift) {
     var receipts = view.rows('receipts');
     var cancelled = {};
@@ -973,6 +1060,7 @@ var Ops = (function () {
         .map(function (m) { return { item_id: m.item_id, qty: m.qty, reason: m.supplier_or_reason, cost: lossOf(m) }; }),
       adjustments: moves.filter(function (m) { return m.type === 'adjust'; })
         .map(function (m) { return { item_id: m.item_id, qty: m.qty, cost: lossOf(m) }; }),
+      control: controlOf(view, shiftId, n, moves),
       below_min: C.belowMin(balance, catalog).map(function (id) {
         return { item_id: id, qty: balance[id] || 0, min: item(id).min_stock };
       })

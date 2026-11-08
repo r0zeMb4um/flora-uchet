@@ -1914,6 +1914,7 @@
             { label: 'Предзаказы к доплате', value: r.preorder_unpaid, color: '#c9b6ff' }
           ], shortMoney(r.revenue) + ' ₸', 'выручка')]));
         }
+        nodes.push(controlCard(r.control));
         nodes.push(el('div', { class: 'card' }, [
           r.discounts ? kv('Скидки', money(r.discounts)) : null,
           kv('Расходы (доставка + прочее)', money(r.delivery + r.other)),
@@ -1956,6 +1957,16 @@
       app.replaceChildren.apply(app, nodes);
     });
   };
+
+  /** Контроль смены: что владелице стоит глянуть (D28). */
+  function controlCard(c) {
+    if (!c) return null;
+    var head = el('div', { class: 'script', style: 'font-size:22px', text: 'Контроль' });
+    if (c.clean) return el('div', { class: 'card' }, [head, el('div', { class: 'muted', text: 'Замечаний нет' })]);
+    var rows = c.items.slice(0, 12).map(function (i) { return el('div', { class: 'ctl ctl--' + i.kind, text: i.text }); });
+    if (c.items.length > 12) rows.push(el('div', { class: 'muted', text: '…и ещё ' + (c.items.length - 12) }));
+    return el('div', { class: 'card card--note' }, [head].concat(rows));
+  }
 
   SCREENS.owner_shift = function () {
     backButton(true);

@@ -62,6 +62,15 @@ var Reports = (function () {
     if (exp) L.push('РАСХОДЫ: ' + exp);
     if (r.withdrawal) L.push('ИЗЪЯТИЕ: ' + money(r.withdrawal));
 
+    if (r.control) {
+      L.push('');
+      if (r.control.clean) L.push('🔎 <b>Контроль:</b> замечаний нет');
+      else {
+        L.push('🔎 <b>КОНТРОЛЬ</b> (что стоит глянуть)');
+        r.control.items.slice(0, 12).forEach(function (c) { L.push('  ' + esc(c.text)); });
+        if (r.control.items.length > 12) L.push('  …и ещё ' + (r.control.items.length - 12));
+      }
+    }
     var goods = [];
     r.income.forEach(function (m) { goods.push('  приход: ' + item(m.item_id) + ' +' + m.qty + ' (' + money(m.cost_sum) + ')'); });
     r.defects.forEach(function (m) { goods.push('  брак: ' + item(m.item_id) + ' ' + signed(m.qty) + ' (' + money(m.cost) + ' по закупке)'); });
