@@ -850,7 +850,10 @@
   })();
   function goMain() {
     // Владелица возвращается в свои разделы, флорист — на главную кассы.
-    if (state.data && state.data.me.role === 'owner') { openScreen(state.screen === 'owner_shift' ? 'owner_history' : 'owner_today'); return; }
+    if (state.data && state.data.me.role === 'owner') {
+      openScreen(OWNER_BACK[state.screen] || (state.screen === 'owner_shift' ? 'owner_history' : state.screen === 'owner_manage' ? 'owner_today' : 'owner_today'));
+      return;
+    }
     state.screen = 'main'; render();
   }
 
@@ -859,8 +862,11 @@
   var NAV_OF = {
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
-    owner_period: 'owner_period', owner_debtors: 'owner_debtors'
+    owner_period: 'owner_period', owner_debtors: 'owner_debtors',
+    owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage'
   };
+  // Куда ведёт «Назад» на экранах управления.
+  var OWNER_BACK = { owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage' };
   function renderNav() {
     var nav = document.getElementById('nav');
     if (!nav) return;
@@ -875,7 +881,7 @@
     };
     var items = isOwner
       ? [item('owner_today', 'home', 'Сегодня'), item('owner_history', 'history', 'История'),
-        item('owner_period', 'chart-line', 'Сводка'), item('owner_debtors', 'users', 'Должники')]
+        item('owner_period', 'chart-line', 'Сводка'), item('owner_debtors', 'users', 'Должники'), item('owner_manage', 'settings', 'Управление')]
       : [item('main', 'home', 'Главная'), item('stock', 'box', 'Склад'),
         el('button', { class: 'nav__plus', 'aria-label': 'Новая продажа', onclick: function () { state.screen = 'sale'; render(); } }, [icon('plus')]),
         item('preorders', 'calendar-heart', 'Заказы'), item('more', 'dots', 'Ещё')];
@@ -1844,7 +1850,7 @@
 
   // ---------- владелица: Сегодня, История, Сводка, Должники ----------
 
-  var OWNER_TABS = [['owner_today', 'Сегодня'], ['owner_history', 'История'], ['owner_period', 'Сводка'], ['owner_debtors', 'Должники']];
+  var OWNER_TABS = [['owner_today', 'Сегодня'], ['owner_history', 'История'], ['owner_period', 'Сводка'], ['owner_debtors', 'Должники'], ['owner_manage', 'Управление']];
 
   function ownerTabs() {
     var cur = state.screen === 'owner_shift' ? 'owner_history' : state.screen;
@@ -1966,6 +1972,142 @@
     var rows = c.items.slice(0, 12).map(function (i) { return el('div', { class: 'ctl ctl--' + i.kind, text: i.text }); });
     if (c.items.length > 12) rows.push(el('div', { class: 'muted', text: '…и ещё ' + (c.items.length - 12) }));
     return el('div', { class: 'card card--note' }, [head].concat(rows));
+  }
+
+  // ---------- владелица: Управление (D29) ----------
+
+  SCREENS.owner_manage = function () {
+    backButton(false);
+    mainButton(null);
+    var tile = function (ic, label, sub, screen) {
+      return el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left', onclick: function () { openScreen(screen); } },
+        [icon(ic), el('b', { text: label }), el('div', { class: 'muted', text: sub })]);
+    };
+    app.replaceChildren(
+      el('h1', { class: 'h1', text: 'Управление' }),
+      el('div', { class: 'muted', text: 'Всё, что настраивается в магазине' }),
+      el('div', { class: 'grid2' }, [
+        tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog')
+      ]),
+      el('div', { class: 'muted center', text: 'Сотрудники, расходы месяца и настройки пока в чате бота — перенесём следующим шагом.' })
+    );
+  };
+
+  SCREENS.owner_catalog = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    if (f.cat === undefined) f.cat = 'all';
+    if (f.q === undefined) f.q = '';
+    ownerLoad('owner_catalog', {}, function (list) {
+      var q = f.q.trim().toLowerCase();
+      var shown = list.filter(function (c) {
+        if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
+        if (f.cat === 'hidden') return c.status === 'hidden';
+        if (c.status === 'hidden') return false;
+        return f.cat === 'all' || c.category === f.cat;
+      });
+      var hiddenCount = list.filter(function (c) { return c.status === 'hidden'; }).length;
+      var cats = [['all', 'Все']].concat(Object.keys(CATS).filter(function (k) { return list.some(function (c) { return c.category === k && c.status !== 'hidden'; }); })
+        .map(function (k) { return [k, CATS[k]]; }));
+      if (hiddenCount) cats.push(['hidden', 'Скрытые · ' + hiddenCount]);
+      var rows = shown.map(function (c) {
+        var low = c.status !== 'hidden' && c.stock < c.min;
+        return el('button', { class: 'card', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left;display:block;width:100%',
+          onclick: function () { openScreen('owner_item', { item: c }); } }, [
+          el('div', { class: 'sum' }, [el('b', { text: c.name }), el('span', { class: 'num', text: money(c.price) })]),
+          el('div', { class: 'muted num', text: 'остаток ' + c.stock + (c.min ? ' · минимум ' + c.min : '') + (c.cost ? ' · закупка ' + money(c.cost) : '') +
+            (c.status === 'review' ? ' · новое, на проверке' : '') + (low ? ' · мало' : '') })
+        ]);
+      });
+      var search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск позиции', value: f.q, 'aria-label': 'Поиск',
+        oninput: function (e) { f.q = e.target.value; render(); var s = document.querySelector('input[type=search]'); if (s) { s.focus(); s.setSelectionRange(f.q.length, f.q.length); } } });
+      app.replaceChildren.apply(app, [
+        el('h1', { class: 'h1', text: 'Склад и каталог' }),
+        el('button', { class: 'btn btn--primary', onclick: function () { openScreen('owner_item_new'); } }, [icon('plus'), 'Новая позиция']),
+        search,
+        chips(cats, f.cat, function (k) { f.cat = k; render(); })
+      ].concat(rows.length ? rows : [emptyState('Ничего не найдено', 'Измените поиск или категорию')]));
+    });
+  };
+
+  /** Одно поле формы: подпись + ввод. */
+  function formField(label, input, hint) {
+    return el('label', { class: 'card', style: 'display:flex;flex-direction:column;gap:6px' }, [
+      el('span', { class: 'muted', text: label }), input, hint ? el('span', { class: 'muted', style: 'font-size:12px', text: hint }) : null]);
+  }
+
+  SCREENS.owner_item = function () {
+    backButton(true);
+    var f = state.form;
+    var it = f.item;
+    if (!it) { openScreen('owner_catalog'); return; }
+    if (f.name === undefined) { f.name = it.name; f.price = String(it.price); f.min = String(it.min); }
+    var price = intOf(f.price), min = intOf(f.min);
+    var payload = { item_id: it.item_id };
+    if (f.name.trim() && f.name.trim() !== it.name) payload.name = f.name.trim();
+    if (price !== null && price > 0 && price !== it.price) payload.sale_price = price;
+    if (min !== null && min >= 0 && min !== it.min) payload.min_stock = min;
+    var changed = Object.keys(payload).length > 1;
+    var valid = f.name.trim().length > 0 && price !== null && price > 0 && min !== null && min >= 0;
+    mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', changed && valid && !state.sending, function () {
+      submitOp('catalog_edit', payload, 'Сохранено', function () { openScreen('owner_catalog'); });
+    });
+    var hidden = it.status === 'hidden';
+    app.replaceChildren(
+      title(it.name, (CATS[it.category] || '') + ' · остаток ' + it.stock + (it.cost ? ' · закупка ' + money(it.cost) : '')),
+      formField('Название', el('input', { class: 'input', value: f.name, maxlength: '80', oninput: function (e) { f.name = e.target.value; render(); } })),
+      formField('Цена продажи, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.price, oninput: function (e) { f.price = e.target.value; render(); } }),
+        'Новая цена действует для следующих продаж. Старые чеки не меняются.'),
+      formField('Минимальный остаток, шт', el('input', { class: 'input num', inputmode: 'numeric', value: f.min, oninput: function (e) { f.min = e.target.value; render(); } }),
+        'Ниже этого числа позиция попадёт в «Заканчиваются» и в закупку.'),
+      el('button', { class: 'btn', disabled: state.sending, onclick: function () {
+        submitOp('catalog_edit', { item_id: it.item_id, status: hidden ? 'active' : 'hidden' }, hidden ? 'Позиция снова в кассе' : 'Позиция скрыта', function () { openScreen('owner_catalog'); });
+      } }, [icon(hidden ? 'eye' : 'eye-off'), hidden ? 'Вернуть в кассу' : 'Скрыть из кассы']),
+      el('div', { class: 'muted center', text: hidden ? 'Скрытая позиция не продаётся, история чеков сохраняется.' : 'Скрыть можно, если позиции больше нет. История чеков сохраняется.' })
+    );
+  };
+
+  SCREENS.owner_item_new = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.name === undefined) { f.name = ''; f.price = ''; f.category = 'flowers'; }
+    var price = intOf(f.price);
+    var valid = f.name.trim().length > 0 && price !== null && price > 0;
+    var send = function (confirm) {
+      busyPost('new_item', { name: f.name.trim(), category: f.category, sale_price: price, confirm_new: confirm === true }).then(function (res) {
+        if (!res) return;
+        if (res.similar) { f.similar = res.similar; render(); return; }
+        toast('Позиция добавлена');
+        openScreen('owner_catalog');
+      });
+    };
+    mainButton(state.sending ? 'Добавляем…' : 'Добавить', valid && !state.sending, function () { send(!!f.similar); });
+    var nodes = [
+      title('Новая позиция', 'Появится в кассе сразу. Остаток внесёт флорист приходом.'),
+      formField('Название', el('input', { class: 'input', value: f.name, maxlength: '80', placeholder: 'Например: Пион розовый', oninput: function (e) { f.name = e.target.value; f.similar = null; render(); } })),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Категория' }), chips(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; }), f.category, function (k) { f.category = k; render(); })]),
+      formField('Цена продажи, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.price, oninput: function (e) { f.price = e.target.value; render(); } }))
+    ];
+    if (f.similar && f.similar.length) {
+      nodes.push(el('div', { class: 'card card--note' }, [
+        el('div', { text: 'Похожие позиции уже есть:' })
+      ].concat(f.similar.map(function (s) { return el('div', { class: 'muted', text: '• ' + s.name }); })).concat([
+        el('div', { class: 'muted', text: 'Если это другая позиция — нажмите «Добавить» ещё раз.' })])));
+    }
+    app.replaceChildren.apply(app, nodes);
+  };
+
+  /** Отправить операцию владелицы; «похожие позиции» возвращаем как обычный результат, а не ошибку. */
+  function busyPost(kind, payload) {
+    var f = state.form;
+    return busy(postOp(kind, payload, f.op_id).catch(function (e) {
+      if (e && e.code === 'SIMILAR_ITEMS') return { similar: e.details || [] };
+      throw e;
+    })).then(function (res) {
+      if (res && res.state) { setData(res.state, true); }
+      return res;
+    });
   }
 
   SCREENS.owner_shift = function () {

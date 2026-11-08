@@ -114,7 +114,7 @@ var MiniApi = (function () {
 
   // ---------- экраны владелицы (этап G) ----------
 
-  var OWNER_KINDS = { correction: true, anonymize: true };
+  var OWNER_KINDS = { correction: true, anonymize: true, catalog_edit: true, new_item: true };
 
   function requireOwnerStaff(staff) {
     if (staff.role !== 'owner') throw apiError('FORBIDDEN', 'Это раздел владелицы');
@@ -225,8 +225,18 @@ var MiniApi = (function () {
     }).sort(function (a, b) { return b.debt - a.debt || (a.name < b.name ? -1 : 1); });
   }
 
+  /** Весь каталог для владелицы: и скрытые позиции, с закупкой и остатком. */
+  function ownerCatalog(store, staff, now) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    return view.rows('catalog').map(function (c) {
+      return { item_id: c.item_id, name: c.name, category: c.category, price: c.sale_price, cost: c.last_cost,
+        min: c.min_stock, stock: view.stock(c.item_id), status: c.status };
+    }).sort(function (a, b) { return a.category === b.category ? (a.name < b.name ? -1 : 1) : (a.category < b.category ? -1 : 1); });
+  }
+
   function ownerDispatch(store, staff, body, now) {
     requireOwnerStaff(staff);
+    if (body.action === 'owner_catalog') return ownerCatalog(store, staff, now);
     if (body.action === 'owner_today') return ownerToday(store, staff, now);
     if (body.action === 'owner_shifts') return ownerShifts(store, staff, now, Math.min(Number(body.limit) || 40, 200));
     if (body.action === 'owner_shift') return ownerShift(store, staff, now, String(body.shift_id || ''));
