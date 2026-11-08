@@ -844,7 +844,11 @@
     logo.setAttribute('role', 'button');
     logo.setAttribute('tabindex', '0');
     logo.setAttribute('aria-label', 'На главную');
-    function home() { if (state.data && state.screen !== 'main') goMain(); }
+    function home() {
+      if (!state.data) return;
+      if (state.data.me.role === 'owner') { if (state.screen !== 'owner_today') openScreen('owner_today'); return; }
+      if (state.screen !== 'main') goMain();
+    }
     logo.addEventListener('click', home);
     logo.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); home(); } });
   })();
@@ -863,10 +867,16 @@
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
     owner_period: 'owner_period', owner_debtors: 'owner_debtors',
-    owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage'
+    owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
+    owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage'
   };
   // Куда ведёт «Назад» на экранах управления.
-  var OWNER_BACK = { owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage' };
+  var OWNER_BACK = {
+    owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
+    owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage'
+  };
   function renderNav() {
     var nav = document.getElementById('nav');
     if (!nav) return;
@@ -1987,9 +1997,11 @@
       el('h1', { class: 'h1', text: 'Управление' }),
       el('div', { class: 'muted', text: 'Всё, что настраивается в магазине' }),
       el('div', { class: 'grid2' }, [
-        tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog')
-      ]),
-      el('div', { class: 'muted center', text: 'Сотрудники, расходы месяца и настройки пока в чате бота — перенесём следующим шагом.' })
+        tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog'),
+        tile('users', 'Сотрудники', 'флористы, ставки, приглашения', 'owner_team'),
+        tile('receipt', 'Расходы месяца', 'аренда, налоги и др.', 'owner_expenses'),
+        tile('adjustments', 'Настройки', 'размен, напоминание, статьи', 'owner_settings')
+      ])
     );
   };
 
@@ -2061,6 +2073,9 @@
         'Новая цена действует для следующих продаж. Старые чеки не меняются.'),
       formField('Минимальный остаток, шт', el('input', { class: 'input num', inputmode: 'numeric', value: f.min, oninput: function (e) { f.min = e.target.value; render(); } }),
         'Ниже этого числа позиция попадёт в «Заканчиваются» и в закупку.'),
+      it.status === 'review' ? el('button', { class: 'btn btn--primary', disabled: state.sending, onclick: function () {
+        submitOp('catalog_edit', { item_id: it.item_id, status: 'active' }, 'Позиция подтверждена', function () { openScreen('owner_catalog'); });
+      } }, [icon('check'), 'Подтвердить новую позицию']) : null,
       el('button', { class: 'btn', disabled: state.sending, onclick: function () {
         submitOp('catalog_edit', { item_id: it.item_id, status: hidden ? 'active' : 'hidden' }, hidden ? 'Позиция снова в кассе' : 'Позиция скрыта', function () { openScreen('owner_catalog'); });
       } }, [icon(hidden ? 'eye' : 'eye-off'), hidden ? 'Вернуть в кассу' : 'Скрыть из кассы']),
@@ -2096,6 +2111,207 @@
         el('div', { class: 'muted', text: 'Если это другая позиция — нажмите «Добавить» ещё раз.' })])));
     }
     app.replaceChildren.apply(app, nodes);
+  };
+
+  // ---------- Управление: сотрудники, расходы, настройки ----------
+
+  /** Процент из поля («3» или «2,5») → сотые доли процента; пусто/ошибка → null. */
+  function pctBp(v) {
+    var s = String(v == null ? '' : v).replace(',', '.').replace(/[\s%]/g, '');
+    if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
+    var bp = Math.round(parseFloat(s) * 100);
+    return bp <= 10000 ? bp : null;
+  }
+  /** Целое со знаком: «150000» или «-150000»; 0 и мусор → null. */
+  function signedInt(v) {
+    var s = String(v == null ? '' : v).replace(/[\s\u00a0\u20bd₸]/g, '').replace('\u2212', '-');
+    return /^-?\d{1,9}$/.test(s) && Number(s) !== 0 ? Number(s) : null;
+  }
+  function bpText(bp) { return String(bp / 100).replace('.', ',') + '%'; }
+  function askOk(text, yes) {
+    if (tg && tg.showConfirm) tg.showConfirm(text, function (ok) { if (ok) yes(); });
+    else if (window.confirm(text)) yes();
+  }
+
+  SCREENS.owner_team = function () {
+    backButton(true);
+    mainButton(null);
+    ownerLoad('owner_team', {}, function (list) {
+      var rows = list.map(function (s) {
+        var status = s.role === 'owner' ? 'владелица' : !s.active ? 'доступ отключён' : s.joined ? 'в кассе' : s.invited ? 'ждёт приглашения' : 'нет входа';
+        var card = el('div', { class: 'card' + (s.active ? '' : ' card--note') }, [
+          el('div', { class: 'sum' }, [el('b', { text: s.name }), el('span', { class: 'muted', text: status })]),
+          s.role === 'florist' ? el('div', { class: 'muted num', text: 'ставка ' + money(s.shift_rate) + ' + ' + bpText(s.pct_bp) + ' от выручки' }) : null
+        ]);
+        if (s.role !== 'florist') return card;
+        card.style.cursor = 'pointer';
+        card.onclick = function () { openScreen('owner_staff', { person: s }); };
+        return card;
+      });
+      app.replaceChildren.apply(app, [
+        el('h1', { class: 'h1', text: 'Сотрудники' }),
+        el('button', { class: 'btn btn--primary', onclick: function () { openScreen('owner_staff_new'); } }, [icon('user-plus'), 'Добавить флориста'])
+      ].concat(rows));
+    });
+  };
+
+  SCREENS.owner_staff_new = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.name === undefined) { f.name = ''; f.rate = ''; f.pct = ''; }
+    var rate = intOf(f.rate), bp = pctBp(f.pct);
+    var valid = f.name.trim().length > 0 && rate !== null && bp !== null;
+    mainButton(state.sending ? 'Создаём…' : 'Создать и получить ссылку', valid && !state.sending, function () {
+      var name = f.name.trim();
+      submitOp('staff_add', { name: name, shift_rate: rate, pct_bp: bp }, 'Флорист добавлен', function (res) {
+        openScreen('owner_invite', { name: name, link: res.result && res.result.invite_link });
+      });
+    });
+    app.replaceChildren(
+      title('Новый флорист', 'После создания появится ссылка-приглашение'),
+      formField('Имя', el('input', { class: 'input', value: f.name, maxlength: '40', oninput: function (e) { f.name = e.target.value; render(); } })),
+      formField('Ставка за смену, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.rate, oninput: function (e) { f.rate = e.target.value; render(); } })),
+      formField('Процент от выручки, %', el('input', { class: 'input num', inputmode: 'decimal', value: f.pct, placeholder: 'например 3 или 2,5', oninput: function (e) { f.pct = e.target.value; render(); } }),
+        'Если в смене двое, процент делится между ними.')
+    );
+  };
+
+  SCREENS.owner_invite = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    if (!f.link) { openScreen('owner_team'); return; }
+    var share = function () {
+      var url = 'https://t.me/share/url?url=' + encodeURIComponent(f.link) + '&text=' + encodeURIComponent('Ссылка для входа в кассу «Флора·Учёт»');
+      if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank');
+    };
+    var copy = function () {
+      var done = function () { toast('Ссылка скопирована'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(f.link).then(done, function () { toast('Не получилось скопировать — выделите ссылку вручную', true); });
+      else toast('Выделите ссылку и скопируйте вручную', true);
+    };
+    app.replaceChildren(
+      title('Ссылка для ' + (f.name || 'сотрудника'), 'Одноразовая, действует 48 часов'),
+      el('div', { class: 'card', style: 'word-break:break-all;user-select:all', text: f.link }),
+      el('button', { class: 'btn btn--primary', onclick: share }, [icon('send'), 'Отправить в Telegram']),
+      el('button', { class: 'btn', onclick: copy }, [icon('copy'), 'Скопировать ссылку']),
+      el('div', { class: 'muted center', text: 'Отправьте её лично этому человеку: ссылка привязывается к первому, кто её откроет.' }),
+      el('button', { class: 'btn', onclick: function () { openScreen('owner_team'); } }, 'Готово')
+    );
+  };
+
+  SCREENS.owner_staff = function () {
+    backButton(true);
+    var f = state.form;
+    var s = f.person;
+    if (!s) { openScreen('owner_team'); return; }
+    if (f.name === undefined) { f.name = s.name; f.rate = String(s.shift_rate); f.pct = String(s.pct_bp / 100).replace('.', ','); }
+    var rate = intOf(f.rate), bp = pctBp(f.pct);
+    var payload = { staff_id: s.staff_id };
+    if (f.name.trim() && f.name.trim() !== s.name) payload.name = f.name.trim();
+    if (rate !== null && rate !== s.shift_rate) payload.shift_rate = rate;
+    if (bp !== null && bp !== s.pct_bp) payload.pct_bp = bp;
+    var valid = f.name.trim().length > 0 && rate !== null && bp !== null;
+    mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', Object.keys(payload).length > 1 && valid && !state.sending, function () {
+      submitOp('staff_edit', payload, 'Сохранено', function () { openScreen('owner_team'); });
+    });
+    app.replaceChildren(
+      title(s.name, s.active ? (s.joined ? 'Работает в кассе' : 'Ещё не заходил') : 'Доступ отключён'),
+      formField('Имя', el('input', { class: 'input', value: f.name, maxlength: '40', oninput: function (e) { f.name = e.target.value; render(); } })),
+      formField('Ставка за смену, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.rate, oninput: function (e) { f.rate = e.target.value; render(); } }),
+        'Новые условия — со следующей смены. Открытая и прошлые смены не меняются.'),
+      formField('Процент от выручки, %', el('input', { class: 'input num', inputmode: 'decimal', value: f.pct, oninput: function (e) { f.pct = e.target.value; render(); } })),
+      s.active ? el('button', { class: 'btn', disabled: state.sending, onclick: function () {
+        submitOp('staff_invite', { staff_id: s.staff_id }, 'Ссылка готова', function (res) { openScreen('owner_invite', { name: s.name, link: res.result && res.result.invite_link }); });
+      } }, [icon('link'), s.joined ? 'Новая ссылка-приглашение (старая перестанет работать)' : 'Показать ссылку-приглашение']) : null,
+      el('button', { class: 'btn btn--close', disabled: state.sending, onclick: function () {
+        var off = s.active;
+        askOk(off ? 'Отключить доступ ' + s.name + '? Записи сохранятся, доступ вернуть можно.' : 'Вернуть доступ ' + s.name + '?', function () {
+          submitOp('staff_set_active', { staff_id: s.staff_id, active: !off }, off ? 'Доступ отключён' : 'Доступ возвращён', function () { openScreen('owner_team'); });
+        });
+      } }, [icon(s.active ? 'user-off' : 'user-check'), s.active ? 'Отключить доступ' : 'Вернуть доступ'])
+    );
+  };
+
+  var MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+  function shiftMonth(m, delta) {
+    var y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)) - 1 + delta;
+    y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
+    return y + '-' + String(mo + 1).padStart(2, '0');
+  }
+
+  SCREENS.owner_expenses = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    ownerLoad('owner_expenses', { month: f.month || '' }, function (d) {
+      if (!f.month) f.month = d.month;
+      if (f.item === undefined) { f.item = d.presets[0] || ''; f.amount = ''; f.comment = ''; }
+      var amount = signedInt(f.amount);
+      var go = function (delta) { return function () { f.month = shiftMonth(f.month, delta); f.data = undefined; render(); }; };
+      var form = el('div', { class: 'card' }, [
+        el('div', { class: 'muted', text: 'Добавить расход за ' + MONTHS[Number(f.month.slice(5, 7)) - 1] }),
+        chips(d.presets.map(function (p) { return [p, p]; }).concat([['__other', 'Другое']]), d.presets.indexOf(f.item) >= 0 ? f.item : '__other', function (k) {
+          f.item = k === '__other' ? '' : k; f.other = k === '__other'; render();
+        }),
+        (f.other || !d.presets.length) ? el('input', { class: 'input', placeholder: 'Название статьи', value: f.item, maxlength: '60', oninput: function (e) { f.item = e.target.value; } }) : null,
+        el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Сумма, ₸ (минус — исправление)', value: f.amount, oninput: function (e) { f.amount = e.target.value; var b = document.getElementById('exp-add'); if (b) b.disabled = !(signedInt(f.amount) && f.item.trim()); } }),
+        el('input', { class: 'input', placeholder: 'Комментарий (по желанию)', value: f.comment, maxlength: '200', oninput: function (e) { f.comment = e.target.value; } }),
+        el('button', { id: 'exp-add', class: 'btn btn--primary', disabled: !(amount && f.item.trim()) || state.sending, onclick: function () {
+          var a = signedInt(f.amount);
+          if (!a || !f.item.trim()) return;
+          var opId = uuid();
+          busy(postOp('owner_expense', { month: f.month, item: f.item.trim(), amount: a, comment: f.comment.trim() }, opId)).then(function (res) {
+            if (!res) return;
+            haptic('success'); toast('Расход добавлен');
+            var keep = f.month; openScreen('owner_expenses', { month: keep });
+          });
+        } }, [icon('plus'), 'Добавить'])
+      ]);
+      var rows = d.items.map(function (e) {
+        return el('div', { class: 'card' }, [
+          el('div', { class: 'sum' }, [el('span', { text: e.item }), el('b', { class: 'num', text: money(e.amount) })]),
+          e.comment ? el('div', { class: 'muted', text: e.comment }) : null
+        ]);
+      });
+      app.replaceChildren.apply(app, [
+        el('h1', { class: 'h1', text: 'Расходы месяца' }),
+        el('div', { class: 'row' }, [
+          el('button', { class: 'chip', onclick: go(-1), 'aria-label': 'Прошлый месяц' }, [icon('chevron-left')]),
+          el('b', { text: MONTHS[Number(f.month.slice(5, 7)) - 1] + ' ' + f.month.slice(0, 4) }),
+          el('button', { class: 'chip', onclick: go(1), 'aria-label': 'Следующий месяц' }, [icon('chevron-right')])
+        ]),
+        el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Всего за месяц' }), el('div', { class: 'big num', text: money(d.total) })]),
+        form,
+        el('div', { class: 'muted center', text: 'Эти расходы идут в прибыль месяца. Записи не удаляются: ошибку исправляет запись с минусом — введите ту же сумму со знаком «−».' })
+      ].concat(rows.length ? rows : [emptyState('Расходов за месяц пока нет', 'Аренда, налоги, реклама — внесите, и прибыль в сводке станет точной.')]));
+    });
+  };
+
+  SCREENS.owner_settings = function () {
+    backButton(true);
+    var f = state.form;
+    ownerLoad('owner_settings', {}, function (d) {
+      if (f.fund === undefined) { f.fund = String(d.change_fund); f.time = d.reminder_time; f.items = d.expense_items.split(';').join(', '); }
+      var fund = intOf(f.fund);
+      var payload = {};
+      if (fund !== null && fund !== d.change_fund) payload.change_fund = fund;
+      if (/^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.time !== d.reminder_time) payload.reminder_time = f.time;
+      if (f.items.trim() && f.items.trim() !== d.expense_items.split(';').join(', ')) payload.expense_items = f.items;
+      var valid = fund !== null && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.items.trim().length > 0;
+      mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', valid && Object.keys(payload).length > 0 && !state.sending, function () {
+        submitOp('settings_edit', payload, 'Настройки сохранены', function () { openScreen('owner_manage'); });
+      });
+      app.replaceChildren(
+        title('Настройки', 'Для этой точки'),
+        formField('Размен в кассе, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.fund, oninput: function (e) { f.fund = e.target.value; render(); } }),
+          'Эта сумма остаётся в кассе при закрытии смены.'),
+        formField('Напомнить закрыть смену в', el('input', { class: 'input', type: 'time', value: f.time, oninput: function (e) { f.time = e.target.value; render(); } }),
+          'Если смена открыта после этого времени, придёт напоминание.'),
+        formField('Статьи расходов месяца', el('input', { class: 'input', value: f.items, maxlength: '300', oninput: function (e) { f.items = e.target.value; render(); } }),
+          'Через запятую, например: Аренда, Налоги, Реклама.')
+      );
+    });
   };
 
   /** Отправить операцию владелицы; «похожие позиции» возвращаем как обычный результат, а не ошибку. */

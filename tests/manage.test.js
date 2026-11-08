@@ -73,3 +73,61 @@ test('новая позиция владелицы: сразу активна, �
   assert.throws(() => post(1, 'new_item', { name: 'Пион', category: 'flowers', sale_price: 0 }));
   assert.throws(() => post(1, 'new_item', { name: '  ', category: 'flowers', sale_price: 500 }));
 });
+
+// ---------- этап 2: сотрудники, расходы, настройки ----------
+
+test('сотрудники: список, добавление со ссылкой-приглашением (токен делает сервер), доступ закрыт флористу', () => {
+  const { call, post } = shop();
+  assert.deepEqual(call(1, { action: 'owner_team' }).map((s) => [s.name, s.role, s.joined]), [['Айгуль', 'owner', true], ['Анна', 'florist', true]]);
+  assert.throws(() => call(777, { action: 'owner_team' }), { code: 'FORBIDDEN' });
+  const res = post(1, 'staff_add', { name: 'Мира', shift_rate: 5000, pct_bp: 250, invite_token: 'short' }); // присланный токен игнорируется
+  const link = res.data.result.invite_link;
+  assert.match(link, /^https:\/\/t\.me\/flora_uchet_bot\?start=[0-9a-f]{32}$/);
+  const mira = call(1, { action: 'owner_team' }).find((s) => s.name === 'Мира');
+  assert.equal(mira.joined, false);
+  assert.equal(mira.invited, true);
+  assert.equal(mira.pct_bp, 250);
+  const again = post(1, 'staff_invite', { staff_id: mira.staff_id });
+  assert.notEqual(again.data.result.invite_link, link, 'новая ссылка заменяет прежнюю');
+  assert.throws(() => post(777, 'staff_add', { name: 'Х', shift_rate: 1, pct_bp: 1 }), { code: 'FORBIDDEN' });
+});
+
+test('правка флориста: ставка и процент — для будущих смен; открытая смена не меняется; процент > 100 — отказ', () => {
+  const { call, post, store, seedPost } = shop();
+  seedPost({ client_id: 'c1', point_id: 'p1', staff_id: 's_anna', role: 'florist', now: NOW }, 'open_shift', { florist_ids: ['s_anna'], open_cash: 0 });
+  post(1, 'staff_edit', { staff_id: 's_anna', shift_rate: 6000, pct_bp: 400, name: 'Анна К.' });
+  const anna = call(1, { action: 'owner_team' }).find((s) => s.staff_id === 's_anna');
+  assert.deepEqual([anna.name, anna.shift_rate, anna.pct_bp], ['Анна К.', 6000, 400]);
+  const snap = store.tables.shift_staff.find((r) => r.staff_id === 's_anna');
+  assert.deepEqual([snap.shift_rate, snap.pct_bp], [5000, 300], 'условия открытой смены записаны при открытии');
+  assert.throws(() => post(1, 'staff_edit', { staff_id: 's_anna', pct_bp: 10001 }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(1, 'staff_edit', { staff_id: 's_anna' }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(777, 'staff_edit', { staff_id: 's_anna', shift_rate: 99999 }), { code: 'FORBIDDEN' });
+});
+
+test('отключение флориста: доступ пропадает сразу, возврат — обратно', () => {
+  const { call, post } = shop();
+  post(1, 'staff_set_active', { staff_id: 's_anna', active: false });
+  assert.throws(() => call(777, { action: 'bootstrap' }), { code: 'FORBIDDEN' });
+  post(1, 'staff_set_active', { staff_id: 's_anna', active: true });
+  assert.ok(call(777, { action: 'bootstrap' }).catalog);
+});
+
+test('расходы месяца: список, итог, исправление минусом, неверный месяц → текущий; настройки точки', () => {
+  const { call, post } = shop();
+  post(1, 'owner_expense', { month: '2026-11', item: 'Аренда', amount: 150000, comment: 'ноябрь' });
+  post(1, 'owner_expense', { month: '2026-11', item: 'Аренда', amount: -10000, comment: 'исправление' });
+  post(1, 'owner_expense', { month: '2026-10', item: 'Налоги', amount: 20000 });
+  const nov = call(1, { action: 'owner_expenses', month: '2026-11' });
+  assert.equal(nov.total, 140000);
+  assert.equal(nov.items.length, 2);
+  assert.equal(call(1, { action: 'owner_expenses', month: '2026-10' }).total, 20000);
+  assert.equal(call(1, { action: 'owner_expenses', month: 'мусор' }).month, '2026-11');
+  assert.throws(() => post(1, 'owner_expense', { month: '2026-11', item: 'Х', amount: 0 }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(777, 'owner_expense', { month: '2026-11', item: 'Х', amount: 5 }), { code: 'FORBIDDEN' });
+  post(1, 'settings_edit', { change_fund: 7000, reminder_time: '21:30', expense_items: 'Аренда, Налоги' });
+  const st = call(1, { action: 'owner_settings' });
+  assert.deepEqual([st.change_fund, st.reminder_time, st.expense_items], [7000, '21:30', 'Аренда;Налоги']);
+  assert.throws(() => post(1, 'settings_edit', { reminder_time: '25:99' }), { code: 'BAD_INPUT' });
+  assert.throws(() => call(777, { action: 'owner_settings' }), { code: 'FORBIDDEN' });
+});

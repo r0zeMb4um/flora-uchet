@@ -828,6 +828,23 @@ var Ops = (function () {
     plan.result = { staff_id: s.staff_id, token: inviteRow(plan, view, s.staff_id, p.invite_token, view.ctx.now) };
   };
 
+  /** Изменить имя, ставку и процент флориста (D29). Действует на будущие смены: в открытой и прошлых смены условия уже записаны в shift_staff. */
+  H.staff_edit = function (view, p, plan) {
+    requireOwner(view);
+    var s = view.staff(p.staff_id);
+    if (!s || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет такого флориста');
+    var set = {};
+    if (p.name !== undefined) set.name = text(p.name, 'имя', 40);
+    if (p.shift_rate !== undefined) set.shift_rate = nonNegInt(p.shift_rate, 'ставка');
+    if (p.pct_bp !== undefined) {
+      set.pct_bp = nonNegInt(p.pct_bp, 'процент');
+      if (set.pct_bp > 10000) throw opsError('BAD_INPUT', 'Процент не больше 100');
+    }
+    if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
+    update(plan, 'staff', { staff_id: s.staff_id, client_id: plan.client_id }, s, set);
+    plan.result = { staff_id: s.staff_id, set: set };
+  };
+
   /** Отключить или вернуть доступ. Отключённый теряет доступ сразу, его записи остаются. */
   H.staff_set_active = function (view, p, plan) {
     requireOwner(view);

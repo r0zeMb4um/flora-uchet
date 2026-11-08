@@ -114,7 +114,47 @@ var MiniApi = (function () {
 
   // ---------- экраны владелицы (этап G) ----------
 
-  var OWNER_KINDS = { correction: true, anonymize: true, catalog_edit: true, new_item: true };
+  var OWNER_KINDS = {
+    correction: true, anonymize: true, catalog_edit: true, new_item: true,
+    staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true
+  };
+
+  /** Одноразовый токен приглашения (не короче 16 символов). */
+  function newToken() {
+    if (typeof Utilities !== 'undefined') return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    return require('node:crypto').randomBytes(16).toString('hex');
+  }
+  function botName() {
+    if (typeof PropertiesService !== 'undefined') return PropertiesService.getScriptProperties().getProperty('BOT_USERNAME') || 'flora_uchet_bot';
+    return 'flora_uchet_bot';
+  }
+
+  /** Команда: флористы, кто уже вошёл, у кого ждёт приглашение. */
+  function ownerTeam(store, staff, now) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var invited = {};
+    view.rows('invites').forEach(function (i) { if (i.status === 'active') invited[i.staff_id] = true; });
+    return view.rows('staff').filter(function (s) { return s.anonymized !== true; }).map(function (s) {
+      return { staff_id: s.staff_id, name: s.name, role: s.role, shift_rate: s.shift_rate, pct_bp: s.pct_bp, active: s.active === true,
+        joined: !!s.telegram_id, invited: !!invited[s.staff_id], me: s.staff_id === staff.staff_id };
+    }).sort(function (a, b) { return (a.role === 'owner' ? 0 : 1) - (b.role === 'owner' ? 0 : 1) || (a.name < b.name ? -1 : 1); });
+  }
+
+  /** Расходы владелицы за месяц и список статей из настроек. */
+  function ownerExpenses(store, staff, now, month) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) month = String(now).slice(0, 7);
+    var items = view.rows('owner_expenses').filter(function (e) { return e.month === month; }).map(function (e) {
+      return { expense_id: e.expense_id, item: e.item, amount: e.amount, comment: e.comment };
+    });
+    var presets = String(view.settings().expense_items || '').split(';').map(function (x) { return x.trim(); }).filter(Boolean);
+    return { month: month, items: items, total: items.reduce(function (a, e) { return a + e.amount; }, 0), presets: presets };
+  }
+
+  function ownerSettings(store, staff, now) {
+    var st = Ops.makeView(store, ctxOf(staff, now)).settings();
+    return { change_fund: st.change_fund, reminder_time: st.reminder_time || '22:00', expense_items: String(st.expense_items || '') };
+  }
 
   function requireOwnerStaff(staff) {
     if (staff.role !== 'owner') throw apiError('FORBIDDEN', 'Это раздел владелицы');
@@ -237,6 +277,9 @@ var MiniApi = (function () {
   function ownerDispatch(store, staff, body, now) {
     requireOwnerStaff(staff);
     if (body.action === 'owner_catalog') return ownerCatalog(store, staff, now);
+    if (body.action === 'owner_team') return ownerTeam(store, staff, now);
+    if (body.action === 'owner_expenses') return ownerExpenses(store, staff, now, String(body.month || ''));
+    if (body.action === 'owner_settings') return ownerSettings(store, staff, now);
     if (body.action === 'owner_today') return ownerToday(store, staff, now);
     if (body.action === 'owner_shifts') return ownerShifts(store, staff, now, Math.min(Number(body.limit) || 40, 200));
     if (body.action === 'owner_shift') return ownerShift(store, staff, now, String(body.shift_id || ''));
@@ -284,9 +327,16 @@ var MiniApi = (function () {
     if (body.action === 'post') {
       var allowed = staff.role === 'florist' ? FLORIST_KINDS[body.kind] : staff.role === 'owner' ? OWNER_KINDS[body.kind] : false;
       if (!allowed) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
-      var res = Posting.post(store, ctxOf(staff, now), { op_id: body.op_id, kind: body.kind, payload: body.payload || {} });
+      var payload = body.payload || {};
+      // Токен приглашения создаёт сервер: касса его не присылает и не знает.
+      if (staff.role === 'owner' && (body.kind === 'staff_add' || body.kind === 'staff_invite')) {
+        payload = Object.assign({}, payload, { invite_token: newToken() });
+      }
+      var res = Posting.post(store, ctxOf(staff, now), { op_id: body.op_id, kind: body.kind, payload: payload });
+      var result = res.result;
+      if (result && result.token) result = Object.assign({}, result, { invite_link: 'https://t.me/' + botName() + '?start=' + result.token });
       return {
-        data: { status: res.status, result: res.result, state: bootstrap(store, staff, now) },
+        data: { status: res.status, result: result, state: bootstrap(store, staff, now) },
         notify: res.notify || [],
         client_id: staff.client_id
       };
