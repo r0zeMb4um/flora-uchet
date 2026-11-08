@@ -73,8 +73,19 @@ var Reports = (function () {
 
   var CATS = { flowers: 'ЦВЕТЫ', greens: 'ЗЕЛЕНЬ', toys: 'ИГРУШКИ', baskets: 'КОРЗИНЫ', packaging: 'УПАКОВКА' };
 
-  /** Сводка за период — шаблон ТЗ. names.staff — имена флористов. */
-  function periodText(s, names) {
+  function pct(cur, prev) {
+    if (!prev) return cur ? 'новое' : '—';
+    var v = Math.round((cur - prev) / Math.abs(prev) * 100);
+    return (v >= 0 ? '↑ ' : '↓ ') + Math.abs(v) + '%';
+  }
+  /** «1 выдача, 2 выдачи, 5 выдач». */
+  function plural(n, one, few, many) {
+    var m = Math.abs(n) % 100, d = m % 10;
+    return n + ' ' + (m > 10 && m < 20 ? many : d === 1 ? one : d > 1 && d < 5 ? few : many);
+  }
+
+  /** Сводка за период — шаблон ТЗ. names.staff — имена флористов; extra: { prev: сводка прошлого периода, top: [...] }. */
+  function periodText(s, names, extra) {
     var person = function (id) { return esc((names.staff || {})[id] || id); };
     var L = [];
     L.push('<b>Сводка ' + dateRu(s.from) + ' — ' + dateRu(s.to) + '</b>' + (s.corrected_shifts ? ' · исправленных смен: ' + s.corrected_shifts : ''));
@@ -100,6 +111,50 @@ var Reports = (function () {
     L.push('Стоимость остатка на складе: на начало ' + money(s.stock_value_start) + ' · на конец ' + money(s.stock_value_end));
     L.push('Не получено: долги ' + money(s.not_received.debts) + ' (старше 30 дней ' + money(s.not_received.debts_old) +
       ') · предзаказы к доплате ' + money(s.not_received.preorders));
+    if (extra && extra.prev) {
+      L.push('');
+      L.push('К прошлому периоду: выручка ' + pct(s.revenue, extra.prev.revenue) + ' · прибыль ' + pct(s.profit, extra.prev.profit));
+    }
+    if (extra && extra.top && extra.top.length) {
+      L.push('Топ: ' + extra.top.map(function (t) { return esc(t.name) + ' ' + t.qty + ' шт'; }).join(' · '));
+    }
+    return L.join('\n');
+  }
+
+  /** Утреннее сообщение владелице: вчера, ниже минимума, что закупить. */
+  function morningText(day, below, restock) {
+    var cash = !day.all_closed ? 'смена не закрыта' : day.cash_diff === 0 ? 'касса сошлась' : 'расхождение кассы ' + money(day.cash_diff);
+    var L = ['🌸 Доброе утро! Вчера: <b>' + money(day.revenue) + '</b> · чеков ' + day.receipts + ' · прибыль ' + money(day.profit) + ' · ' + cash +
+      (day.top_item ? ' · лучшая позиция — ' + esc(day.top_item.name) : '') + '.'];
+    if (below.length) L.push('Ниже минимума: ' + below.slice(0, 6).map(function (b) { return esc(b.name) + ' ' + b.qty + '/' + b.min; }).join(', ') + '.');
+    if (restock.length) L.push('Закупить: ' + restock.slice(0, 6).map(function (x) { return esc(x.name) + ' ' + x.buy; }).join(', ') + '.');
+    L.push('Подробности — в «Кассе» → «Сегодня».');
+    return L.join('\n');
+  }
+
+  function restockText(list) {
+    if (!list.length) return 'Запасов хватает: закупать ничего не нужно.';
+    var L = ['<b>Закупка на неделю</b>', 'Считаем так: продано за 7 дней + минимум − есть сейчас.', ''];
+    list.forEach(function (x) {
+      L.push(esc(x.name) + ' — есть ' + x.stock + ' (мин. ' + x.min + ')' + (x.weekly ? ', за неделю продано ' + x.weekly : '') +
+        (x.days_left !== null && x.days_left < 7 ? ', хватит на ' + plural(x.days_left, 'день', 'дня', 'дней') : '') + ' → <b>закупить ' + x.buy + '</b>');
+    });
+    L.push('', '<b>Закупить:</b> ' + list.map(function (x) { return esc(x.name) + ' ' + x.buy; }).join(', '));
+    return L.join('\n');
+  }
+
+  /** Напоминание о выдачах на день: label — «Сегодня» или «Завтра». Пустая строка, если выдач нет. */
+  function pickupsText(p, label) {
+    if (!p.total && !p.overdue) return '';
+    var L = [];
+    if (p.total) {
+      var notReady = p.waiting + p.reservations;
+      L.push('📦 ' + label + ' ' + plural(p.total, 'выдача', 'выдачи', 'выдач') + (notReady ? ': не собрано ' + notReady + ' — проверьте сборку' : ': всё собрано') + '.');
+      p.items.slice(0, 8).forEach(function (i) {
+        L.push('  ' + esc(i.customer) + ' · ' + money(i.total) + (i.reservation ? ' · бронь без аванса' : i.assembled ? ' · собран' : ' · НЕ СОБРАН'));
+      });
+    }
+    if (p.overdue) L.push('⚠️ Просрочено выдач: ' + p.overdue + ' — проверьте, забрали ли заказ.');
     return L.join('\n');
   }
 
@@ -128,7 +183,8 @@ var Reports = (function () {
     return L.join('\n');
   }
 
-  return { shiftText: shiftText, periodText: periodText, stockText: stockText, debtorsText: debtorsText, money: money };
+  return { shiftText: shiftText, periodText: periodText, stockText: stockText, debtorsText: debtorsText, money: money,
+    morningText: morningText, restockText: restockText, pickupsText: pickupsText, plural: plural, pct: pct };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Reports;

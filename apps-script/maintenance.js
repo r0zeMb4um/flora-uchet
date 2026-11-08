@@ -31,7 +31,43 @@ var Maintenance = (function () {
   /** Доля заполненности таблицы (предел Google — 10 млн ячеек). */
   function fillRatio(cells) { return cells / 10000000; }
 
-  return { shouldRemind: shouldRemind, reminderKey: reminderKey, backupsToDelete: backupsToDelete, fillRatio: fillRatio };
+  /** Ключ недели — дата её понедельника (для счётчиков скорости). */
+  function weekKey(dateIso) {
+    var d = new Date(Date.parse(String(dateIso).slice(0, 10) + 'T00:00:00Z'));
+    var back = (d.getUTCDay() + 6) % 7;
+    return new Date(d.getTime() - back * 86400000).toISOString().slice(0, 10);
+  }
+
+  /** Что в недельном отчёте не в порядке. st — собранные цифры недели. */
+  function digestProblems(st) {
+    var p = [];
+    if (st.errors > 0) p.push('ошибок бота: ' + st.errors + ' (лист audit)');
+    if (st.failed_ops > 0) p.push('операций «не прошла»: ' + st.failed_ops);
+    if (st.perf && st.perf.n && (st.perf.slow > 0 || st.perf.sum / st.perf.n > 3000)) {
+      p.push('касса отвечает медленно: в среднем ' + Math.round(st.perf.sum / st.perf.n) + ' мс, медленных запросов (дольше 5 с) ' + st.perf.slow);
+    }
+    if (st.fill > 0.5) p.push('таблица заполнена на ' + Math.round(st.fill * 100) + '%');
+    if (!st.last_backup || st.backup_age_days > 2) p.push('резервной копии нет уже ' + (st.last_backup ? st.backup_age_days + ' дн.' : 'совсем'));
+    if (st.webhook_problem) p.push('вебхук Telegram: ' + st.webhook_problem);
+    if (st.stale_open_shifts > 0) p.push('смен открыто больше суток: ' + st.stale_open_shifts);
+    return p;
+  }
+
+  /** Текст недельного отчёта администратору: вердикт, потом цифры. */
+  function digestText(st) {
+    var problems = digestProblems(st);
+    var L = [problems.length ? '⚠️ Неделя ' + st.from + ' — ' + st.to + ': есть что проверить' : '✅ Неделя ' + st.from + ' — ' + st.to + ': всё спокойно'];
+    problems.forEach(function (x) { L.push('  • ' + x); });
+    L.push('');
+    L.push('Работа: смен ' + st.shifts + ', чеков ' + st.receipts + ', запросов кассы ' + (st.perf ? st.perf.n : 0));
+    if (st.perf && st.perf.n) L.push('Скорость кассы: в среднем ' + Math.round(st.perf.sum / st.perf.n) + ' мс, самый долгий ' + st.perf.max + ' мс');
+    L.push('Ошибок: ' + st.errors + ' · не прошедших операций: ' + st.failed_ops);
+    L.push('Таблица заполнена на ' + (Math.round(st.fill * 1000) / 10) + '% · копий на Диске: ' + st.backups + (st.last_backup ? ', последняя ' + st.last_backup : ''));
+    return L.join('\n');
+  }
+
+  return { shouldRemind: shouldRemind, reminderKey: reminderKey, backupsToDelete: backupsToDelete, fillRatio: fillRatio,
+    weekKey: weekKey, digestProblems: digestProblems, digestText: digestText };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Maintenance;
@@ -47,7 +83,10 @@ function installTriggers() {
   ScriptApp.newTrigger('reminderTick').timeBased().everyMinutes(15).create();
   ScriptApp.newTrigger('nightly').timeBased().atHour(3).everyDays(1).inTimezone('Asia/Almaty').create();
   ScriptApp.newTrigger('healthCheck').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Almaty').create();
-  Logger.log('Триггеры поставлены: напоминание каждые 15 минут, ночная проверка и копия в 03:00, проверка бота в 09:00.');
+  ScriptApp.newTrigger('pickupsToday').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Almaty').create();
+  ScriptApp.newTrigger('pickupsTomorrow').timeBased().atHour(18).everyDays(1).inTimezone('Asia/Almaty').create();
+  ScriptApp.newTrigger('weeklyDigest').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).inTimezone('Asia/Almaty').create();
+  Logger.log('Триггеры поставлены: напоминание о смене каждые 15 минут; копия и проверки в 03:00; проверка бота, утро владелицы и выдачи на сегодня в 09:00; выдачи на завтра в 18:00; недельный отчёт администратору по понедельникам.');
   nightly(); // сразу проверить, что всё работает (первая копия появится на Диске)
   healthCheck();
 }
@@ -132,11 +171,72 @@ function morningCard_() {
     var view = Ops.makeView(store, { client_id: o.client_id, point_id: o.point_id, staff_id: o.staff_id, role: 'owner', now: now });
     var d = Summary.day(view, yesterday);
     if (!d.shifts) return;
-    var cash = !d.all_closed ? 'смена не закрыта' : d.cash_diff === 0 ? 'касса сошлась' : 'расхождение кассы ' + Tg.money(d.cash_diff);
-    var top = d.top_item ? ' · лучшая позиция — ' + Tg.esc(d.top_item.name) : '';
-    Tg.send(o.telegram_id, '🌸 Доброе утро! Вчера: <b>' + Tg.money(d.revenue) + '</b> · чеков ' + d.receipts + ' · ' + cash + top +
-      '.\nКарточка дня — в «Кассе» → «Сегодня».');
+    Tg.send(o.telegram_id, Reports.morningText(d, Summary.stock(view).below, Summary.restock(view)));
   });
+}
+
+/** Напоминание о выдачах на дату всем сотрудникам точки и владелице. Пустое — не шлём. */
+function pickupReminder_(offsetDays, label) {
+  var store = SheetsStore.open();
+  var now = nowIso();
+  var date = new Date(Date.parse(now.slice(0, 10) + 'T00:00:00Z') + offsetDays * 86400000).toISOString().slice(0, 10);
+  var sent = {};
+  store.rows('staff').filter(function (s) { return s.active === true && s.telegram_id; }).forEach(function (s) {
+    var key = s.client_id + '|' + s.point_id;
+    var view = Ops.makeView(store, { client_id: s.client_id, point_id: s.point_id, staff_id: s.staff_id, role: s.role, now: now });
+    var text = sent[key] !== undefined ? sent[key] : (sent[key] = Reports.pickupsText(Summary.pickups(view, date), label));
+    if (text) Tg.send(s.telegram_id, text);
+  });
+}
+function pickupsToday() { pickupReminder_(0, 'Сегодня'); }
+function pickupsTomorrow() { pickupReminder_(1, 'Завтра'); }
+
+/** Счётчик скорости кассы: запросов, сумма и максимум миллисекунд за неделю (в свойствах скрипта). */
+function recordPerf_(ms) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var key = 'PERF_' + Maintenance.weekKey(nowIso());
+    var c = JSON.parse(props.getProperty(key) || '{"n":0,"sum":0,"max":0,"slow":0}');
+    c.n += 1; c.sum += ms; c.max = Math.max(c.max, ms); if (ms > 5000) c.slow += 1;
+    props.setProperty(key, JSON.stringify(c));
+  } catch (e) { /* счётчик не должен ломать запрос */ }
+}
+
+/** Недельный отчёт администратору: вердикт и пять-шесть цифр. По понедельникам. */
+function weeklyDigest() {
+  var store = SheetsStore.open();
+  var now = nowIso();
+  var today = now.slice(0, 10);
+  var from = new Date(Date.parse(today + 'T00:00:00Z') - 7 * 86400000).toISOString().slice(0, 10);
+  var to = new Date(Date.parse(today + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+  var props = PropertiesService.getScriptProperties();
+  var lastWeek = Maintenance.weekKey(from);
+  var perf = JSON.parse(props.getProperty('PERF_' + lastWeek) || 'null');
+  var st = { from: from.split('-').reverse().join('.'), to: to.split('-').reverse().join('.'), perf: perf };
+  st.errors = store.rows('audit').filter(function (a) { return a.action === 'error' && String(a.ts).slice(0, 10) >= from; }).length;
+  st.failed_ops = store.rows('ops_log').filter(function (o) { return o.status === 'failed' && String(o.created_at).slice(0, 10) >= from; }).length;
+  var shifts = store.rows('shifts').filter(function (s) { return s.shift_date >= from && s.shift_date <= to; });
+  st.shifts = shifts.length;
+  var ids = {};
+  shifts.forEach(function (s) { ids[s.shift_id] = true; });
+  st.receipts = store.rows('receipts').filter(function (r) { return ids[r.shift_id] && r.status !== 'cancelled'; }).length;
+  st.stale_open_shifts = store.rows('shifts').filter(function (s) { return s.status === 'open' && s.shift_date < today; }).length;
+  st.fill = Maintenance.fillRatio(store.spreadsheet.getSheets().reduce(function (a, sh) { return a + sh.getMaxRows() * sh.getMaxColumns(); }, 0));
+  var names = [];
+  var folders = DriveApp.getFoldersByName(BACKUP_FOLDER);
+  if (folders.hasNext()) { var files = folders.next().getFiles(); while (files.hasNext()) names.push(files.next().getName()); }
+  var dates = names.map(function (n) { var m = /копия (\d{4}-\d{2}-\d{2})$/.exec(n); return m ? m[1] : ''; }).filter(Boolean).sort();
+  st.backups = dates.length;
+  st.last_backup = dates.length ? dates[dates.length - 1].split('-').reverse().join('.') : '';
+  st.backup_age_days = dates.length ? Math.round((Date.parse(today + 'T00:00:00Z') - Date.parse(dates[dates.length - 1] + 'T00:00:00Z')) / 86400000) : 999;
+  try {
+    var info = Tg.call('getWebhookInfo');
+    st.webhook_problem = !info.url ? 'не подключён' : info.last_error_message ? info.last_error_message : info.pending_update_count > 0 ? 'очередь ' + info.pending_update_count : '';
+  } catch (e) { st.webhook_problem = 'Telegram не отвечает'; }
+  adminSay_(Maintenance.digestText(st));
+  // Счётчики старше 4 недель удаляем.
+  var cut = Maintenance.weekKey(new Date(Date.parse(today + 'T00:00:00Z') - 28 * 86400000).toISOString().slice(0, 10));
+  Object.keys(props.getProperties()).forEach(function (k) { if (k.indexOf('PERF_') === 0 && k.slice(5) < cut) props.deleteProperty(k); });
 }
 
 /** Утренняя проверка бота: вебхук без ошибок и очереди, ошибки за сутки. Заодно — утреннее сообщение владелице. */

@@ -192,13 +192,138 @@ var Summary = (function () {
     var it = top ? view.item(top) : null;
     return {
       date: date, shifts: shifts.length, revenue: s.revenue, receipts: s.receipts, avg_check: s.avg_check,
+      profit: s.profit + s.owner_expenses, // прибыль дня: расходы месяца (аренда и др.) по дням не делятся
       cash_diff: closed.reduce(function (a, x) { return a + (x.cash_diff || 0); }, 0),
       all_closed: shifts.length > 0 && closed.length === shifts.length,
       top_item: it ? { item_id: it.item_id, name: it.name, category: it.category, qty: sold[top] } : null
     };
   }
 
-  return { period: period, stock: stock, debtors: debtors, months: months, day: day };
+  function addDays(date, n) { return new Date(Date.parse(date + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
+
+  /** Прошлый период той же длины, вплотную перед этим. */
+  function prevRange(from, to) {
+    var len = Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000) + 1;
+    return [addDays(from, -len), addDays(from, -1)];
+  }
+
+  /** Топ позиций по проданным штукам за период (проданное минус возвращённое отменой чека). */
+  function top(view, from, to, n) {
+    var ids = {};
+    view.rows('shifts').filter(function (x) { return x.shift_date >= from && x.shift_date <= to; }).forEach(function (x) { ids[x.shift_id] = true; });
+    var sold = {};
+    view.rows('stock_moves').forEach(function (m) {
+      if ((m.type === 'sale' || m.type === 'cancel') && ids[m.shift_id]) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
+    });
+    return Object.keys(sold).filter(function (id) { return sold[id] > 0; })
+      .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, n || 5)
+      .map(function (id) { var it = view.item(id) || {}; return { item_id: id, name: it.name || id, category: it.category || '', qty: sold[id] }; });
+  }
+
+  /**
+   * Подсказка закупки. Берём позиции, которых меньше минимума или не хватит на неделю при текущих продажах.
+   * Закупить = продано за 7 дней + минимальный остаток − есть сейчас, вверх до кратного 5 (не меньше 5).
+   */
+  function restock(view) {
+    var today = view.ctx.now.slice(0, 10);
+    var from = addDays(today, -6);
+    var sold = {};
+    view.rows('stock_moves').forEach(function (m) {
+      if ((m.type === 'sale' || m.type === 'cancel') && String(m.created_at).slice(0, 10) >= from) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
+    });
+    var bal = {};
+    view.balance().forEach(function (b) { bal[b.item_id] = b.qty; });
+    var out = [];
+    view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; }).forEach(function (c) {
+      var stock = bal[c.item_id] || 0;
+      var weekly = Math.max(0, sold[c.item_id] || 0);
+      if (!(stock < c.min_stock || (weekly > 0 && stock < weekly))) return;
+      var need = weekly + c.min_stock - stock;
+      out.push({ item_id: c.item_id, name: c.name, category: c.category, stock: stock, min: c.min_stock, weekly: weekly,
+        buy: Math.max(5, Math.ceil(need / 5) * 5), days_left: weekly > 0 ? Math.floor(stock / (weekly / 7)) : null });
+    });
+    out.sort(function (a, b) {
+      var la = a.stock < a.min ? 0 : 1, lb = b.stock < b.min ? 0 : 1;
+      if (la !== lb) return la - lb;
+      var da = a.days_left === null ? 1e9 : a.days_left, db = b.days_left === null ? 1e9 : b.days_left;
+      return da - db || (a.name < b.name ? -1 : 1);
+    });
+    return out;
+  }
+
+  /** Выдачи на дату: предзаказы (не собраны / собраны) и брони; просроченные — раньше сегодняшней даты. */
+  function pickups(view, date) {
+    var today = view.ctx.now.slice(0, 10);
+    var names = {};
+    view.rows('customers').forEach(function (c) { names[c.customer_id] = c.name; });
+    var pre = view.rows('receipts').filter(function (r) {
+      return r.type === 'preorder' && r.status === 'posted' && (r.assembly_status === 'waiting' || r.assembly_status === 'assembled');
+    });
+    var res = view.rows('reservations').filter(function (r) { return r.status === 'active'; });
+    var on = pre.filter(function (r) { return r.pickup_date === date; });
+    return {
+      date: date, total: on.length + res.filter(function (r) { return r.pickup_date === date; }).length,
+      waiting: on.filter(function (r) { return r.assembly_status === 'waiting'; }).length,
+      assembled: on.filter(function (r) { return r.assembly_status === 'assembled'; }).length,
+      reservations: res.filter(function (r) { return r.pickup_date === date; }).length,
+      overdue: pre.filter(function (r) { return r.pickup_date < today; }).length + res.filter(function (r) { return r.pickup_date < today; }).length,
+      items: on.map(function (r) { return { customer: names[r.customer_id] || '', total: r.total, assembled: r.assembly_status === 'assembled' }; })
+        .concat(res.filter(function (r) { return r.pickup_date === date; }).map(function (r) { return { customer: names[r.customer_id] || '', total: r.total, reservation: true }; }))
+    };
+  }
+
+  /** Таблицы для выгрузки в Excel за период — только данные этого клиента и точки (вид уже отфильтрован). */
+  function exportTables(view, from, to) {
+    var s = period(view, from, to);
+    var shifts = view.rows('shifts').filter(function (x) { return x.shift_date >= from && x.shift_date <= to; }).sort(function (a, b) { return a.shift_no - b.shift_no; });
+    var staffName = {};
+    view.rows('staff').forEach(function (x) { staffName[x.staff_id] = x.name; });
+    var itemName = {};
+    view.rows('catalog').forEach(function (x) { itemName[x.item_id] = x.name; });
+    var summaryRows = [['Показатель', 'Значение'], ['Период', from + ' — ' + to], ['Выручка, ₸', s.revenue], ['Смен', s.shifts], ['Чеков', s.receipts],
+      ['Средний чек, ₸', s.avg_check], ['Получено наличными, ₸', s.cash], ['Получено безналом, ₸', s.card], ['Закупки, ₸', s.purchases],
+      ['Зарплата, ₸', s.payroll], ['Доставки, ₸', s.delivery], ['Прочие расходы, ₸', s.other], ['Возвраты, ₸', s.refunds],
+      ['Расходы месяца (аренда и др.), ₸', s.owner_expenses], ['ПРИБЫЛЬ, ₸', s.profit],
+      ['Брак по закупке, ₸', s.losses.defects], ['Замены, ₸', s.losses.replaces], ['Недостачи товара, ₸', s.losses.shortage],
+      ['Расхождения кассы, ₸', s.losses.cash_diff], ['Скидки, ₸', s.discounts], ['Изъято владелицей, ₸', s.withdrawal],
+      ['Долги (на сейчас), ₸', s.not_received.debts], ['Предзаказы к доплате (на сейчас), ₸', s.not_received.preorders]];
+    var shiftRows = [['№ смены', 'Дата', 'Флористы', 'Выручка, ₸', 'Чеков', 'Нал, ₸', 'Безнал, ₸', 'В долг, ₸', 'Расхождение кассы, ₸', 'Статус']];
+    var payRows = view.rows('payments');
+    var receiptRows = [['№ смены', '№ чека', 'Время', 'Тип', 'Цена, ₸', 'Скидка, ₸', 'Итого, ₸', 'Нал, ₸', 'Безнал, ₸', 'В долг, ₸', 'Статус']];
+    var typeRu = { sale: 'продажа', bouquet: 'букет', preorder: 'предзаказ' };
+    shifts.forEach(function (sh) {
+      var rep = O.shiftReport(view, sh.shift_id);
+      shiftRows.push([sh.shift_no, sh.shift_date, rep.florists.join(', '), rep.revenue, rep.receipts_count, rep.sales_cash, rep.sales_card, rep.sales_debt,
+        sh.status === 'closed' ? sh.cash_diff : '', sh.status === 'closed' ? 'закрыта' : 'открыта']);
+      view.rows('receipts').filter(function (rc) { return rc.shift_id === sh.shift_id; }).sort(function (a, b) { return a.receipt_no - b.receipt_no; }).forEach(function (rc) {
+        var cash = 0, card = 0;
+        payRows.forEach(function (p) {
+          if (p.receipt_id !== rc.receipt_id || p.kind === 'refund' || p.shift_id !== sh.shift_id) return;
+          if (p.method === 'cash') cash += p.amount; else card += p.amount;
+        });
+        receiptRows.push([sh.shift_no, rc.receipt_no, String(rc.created_at).slice(11, 16), typeRu[rc.type] || rc.type, rc.price, rc.discount_amount, rc.total,
+          cash, card, rc.debt_amount || 0, rc.status === 'cancelled' ? 'снят' : 'проведён']);
+      });
+    });
+    var debtRows = [['Покупатель', 'Пометка', 'Долг, ₸', 'С даты']].concat(debtors(view).map(function (d) { return [d.name, d.note, d.debt, d.since]; }));
+    var stockRows = [['Позиция', 'Остаток, шт', 'Минимум, шт']].concat(stock(view).items.map(function (i) { return [i.name, i.qty, i.min]; }));
+    return [{ name: 'Сводка', rows: summaryRows }, { name: 'Смены', rows: shiftRows }, { name: 'Чеки', rows: receiptRows },
+      { name: 'Должники', rows: debtRows }, { name: 'Остатки', rows: stockRows }];
+  }
+
+  /** CSV для Excel: разделитель «;», кодировка UTF-8 с BOM, кавычки экранированы. Запасной вариант, если xlsx не получился. */
+  function toCsv(rows) {
+    var body = rows.map(function (row) {
+      return row.map(function (cell) {
+        var v = cell === null || cell === undefined ? '' : String(cell);
+        return /[;"\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(';');
+    }).join('\r\n');
+    return '﻿' + body;
+  }
+
+  return { period: period, stock: stock, debtors: debtors, months: months, day: day, prevRange: prevRange, top: top,
+    restock: restock, pickups: pickups, exportTables: exportTables, toCsv: toCsv };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Summary;

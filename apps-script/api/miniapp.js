@@ -140,7 +140,7 @@ var MiniApi = (function () {
     var yesterday = new Date(Date.parse(now.slice(0, 10) + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
     var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
     return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
-      shift: rep, names: names(view), below_min: st.below, alerts: alerts, yesterday: Summary.day(view, yesterday) };
+      shift: rep, names: names(view), below_min: st.below, restock: Summary.restock(view), alerts: alerts, yesterday: Summary.day(view, yesterday) };
   }
 
   function ownerShifts(store, staff, now, limit) {
@@ -204,17 +204,13 @@ var MiniApi = (function () {
       day.revenue += r.revenue;
       day.profit += r.revenue - r.refunds_cash - r.refunds_card - pay - r.delivery - r.other;
     });
-    var sold = {};
     view.rows('stock_moves').forEach(function (m) {
       if (m.type === 'income' && ids[m.shift_id] && byDay[ids[m.shift_id]]) byDay[ids[m.shift_id]].profit -= (m.cost_sum || 0);
-      if (m.type === 'sale' && ids[m.shift_id]) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
     });
-    var top = Object.keys(sold).filter(function (id) { return sold[id] > 0; }).sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 5)
-      .map(function (id) { var it = view.item(id) || {}; return { item_id: id, name: it.name || id, category: it.category || '', qty: sold[id] }; });
+    var top = Summary.top(view, from, to, 5);
     // Прошлый период той же длины — для «↑12%».
-    var len = days.length;
-    var pTo = new Date(Date.parse(from + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
-    var pFrom = new Date(Date.parse(from + 'T00:00:00Z') - len * 86400000).toISOString().slice(0, 10);
+    var pr = Summary.prevRange(from, to);
+    var pFrom = pr[0], pTo = pr[1];
     var prev = Summary.period(view, pFrom, pTo);
     return { summary: s, days: days, top: top, prev: { from: pFrom, to: pTo, revenue: prev.revenue, profit: prev.profit, receipts: prev.receipts },
       names: names(view) };
@@ -243,12 +239,18 @@ var MiniApi = (function () {
   function dispatch(store, telegramId, body, now) {
     var staff = staffOf(store, telegramId);
     if (body.action === 'bootstrap') return { data: bootstrap(store, staff, now), notify: [] };
-    if (String(body.action).indexOf('owner_') === 0) return { data: ownerDispatch(store, staff, body, now), notify: [] };
+    if (String(body.action).indexOf('owner_') === 0 && body.action !== 'owner_export') return { data: ownerDispatch(store, staff, body, now), notify: [] };
     if (body.action === 'send_image') {
       // Картинка (чек клиенту, карточка дня) приходит самому сотруднику в чат с ботом — оттуда её пересылают.
       var b64 = String(body.image || '');
       if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 3000000) throw apiError('BAD_INPUT', 'Картинка не получилась — попробуйте ещё раз');
       return { data: { sent: true }, notify: [], photo: { chat_id: staff.telegram_id, base64: b64, caption: String(body.caption || '').slice(0, 900) } };
+    }
+    if (body.action === 'owner_export') {
+      if (staff.role !== 'owner') throw apiError('FORBIDDEN', 'Это раздел владелицы');
+      var from = String(body.from || ''), to = String(body.to || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw apiError('BAD_INPUT', 'Период: даты ГГГГ-ММ-ДД');
+      return { data: { sent: true }, notify: [], export: { from: from, to: to, staff: staff } };
     }
     if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
     if (body.action === 'close_preview') {
@@ -285,10 +287,14 @@ var MiniApi = (function () {
   /** Вход из doPost (Apps Script). */
   function handle(data) {
     var store = null;
+    var t0 = Date.now();
     try {
       var auth = Auth.verifyGas(data.initData);
       store = SheetsStore.open();
       var out = dispatch(store, auth.user.id, data, nowIso());
+      if (out.export) {
+        ExportExcel.sendTo(store, ctxOf(out.export.staff, nowIso()), out.export.staff.telegram_id, out.export.from, out.export.to);
+      }
       if (out.photo) {
         var blob = Utilities.newBlob(Utilities.base64Decode(out.photo.base64), 'image/jpeg', 'flora.jpg');
         Tg.sendPhoto(out.photo.chat_id, blob, out.photo.caption);
@@ -296,6 +302,7 @@ var MiniApi = (function () {
       if (out.notify.length) {
         try { Webhook.notify(store, out.client_id, out.notify); } catch (ignore) { /* уведомление не ломает продажу */ }
       }
+      if (typeof recordPerf_ === 'function') recordPerf_(Date.now() - t0);
       return jsonOut_({ ok: true, data: out.data });
     } catch (err) {
       if (err.code) return jsonOut_({ ok: false, error: { code: err.code, message: err.message, details: err.details || null } });

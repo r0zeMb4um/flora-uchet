@@ -50,5 +50,15 @@ var Tg = (function () {
     return body.result;
   }
 
-  return { call: call, send: send, sendPhoto: sendPhoto, esc: esc, money: money };
+  /** Файл в чат (Excel/CSV). */
+  function sendDocument(chatId, blob, caption) {
+    var res = UrlFetchApp.fetch('https://api.telegram.org/bot' + token() + '/sendDocument', {
+      method: 'post', payload: { chat_id: String(chatId), caption: caption || '', document: blob }, muteHttpExceptions: true
+    });
+    var body = JSON.parse(res.getContentText() || '{}');
+    if (!body.ok) throw new Error('Telegram sendDocument: ' + (body.description || res.getResponseCode()));
+    return body.result;
+  }
+
+  return { call: call, send: send, sendPhoto: sendPhoto, sendDocument: sendDocument, esc: esc, money: money };
 })();

@@ -1609,7 +1609,15 @@
           r.defects.length ? kv('Брак (по закупке)', money(r.defects.reduce(function (a, x) { return a + x.cost; }, 0)), 'copper') : null
         ]));
       }
-      if (d.below_min.length) {
+      if (d.restock && d.restock.length) {
+        nodes.push(el('div', { class: 'card' }, [el('div', { class: 'script', style: 'font-size:24px', text: 'Закупка на неделю' }),
+          el('div', { class: 'muted', text: 'Продано за 7 дней + минимум − есть сейчас' })].concat(d.restock.slice(0, 8).map(function (x) {
+          return el('div', { class: 'item' }, [el('div', { class: 'item__main' }, [
+            el('div', { style: 'font-weight:600', text: x.name }),
+            el('div', { class: 'muted num', style: 'font-size:13px', text: 'есть ' + x.stock + ' · мин. ' + x.min + (x.weekly ? ' · за неделю ' + x.weekly : '') })]),
+            el('b', { class: 'num copper', text: '+' + x.buy })]);
+        }))));
+      } else if (d.below_min.length) {
         nodes.push(el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Ниже минимума' })].concat(d.below_min.map(function (b) {
           return kv(b.name, b.qty + ' / ' + b.min, 'copper');
         }))));
@@ -1756,7 +1764,12 @@
           kv('Склад: начало → конец', money(s.stock_value_start) + ' → ' + money(s.stock_value_end)),
           kv('Не получено: долги', money(s.not_received.debts) + (s.not_received.debts_old ? ' (старше 30 дн. ' + money(s.not_received.debts_old) + ')' : '')),
           kv('Предзаказы к доплате', money(s.not_received.preorders))
-        ])
+        ]),
+        el('button', { class: 'btn', disabled: state.sending, onclick: function () {
+          busy(api({ action: 'owner_export', from: range[0], to: range[1] })).then(function (ok) {
+            if (ok) toast('Файл Excel придёт вам в чат с ботом');
+          });
+        } }, [icon('file-spreadsheet'), 'Выгрузить в Excel'])
       ]));
     });
   };

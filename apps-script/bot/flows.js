@@ -34,9 +34,12 @@ var ChatFlows = (function () {
     'Остатки': 'stock',
     'Должники': 'debtors',
     'Каталог': 'catalog',
-    'Настройки': 'settings'
+    'Настройки': 'settings',
+    'Закупка': 'restock',
+    'Выгрузка в Excel': 'export'
   };
-  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true, period: true, stock: true, debtors: true, catalog: true, settings: true };
+  var OWNER_FLOWS = { staff: true, expenses: true, preorders: true, report: true, period: true, stock: true, debtors: true, catalog: true, settings: true,
+    restock: true, export: true };
   var CANCEL_ROW = [{ text: 'Отмена', callback_data: 'f:x' }];
 
   function money(n) {
@@ -306,6 +309,14 @@ var ChatFlows = (function () {
           [{ text: 'Размен', callback_data: 'o:se:change_fund' }], [{ text: 'Время напоминания', callback_data: 'o:se:reminder_time' }],
           [{ text: 'Статьи расходов', callback_data: 'o:se:expense_items' }], CANCEL_ROW]);
       }
+      if (st.flow === 'restock') return deps.send(R().restockText(S.restock(view)));
+      if (st.flow === 'export') {
+        st.step = 'range';
+        deps.state.set(st);
+        return deps.send('Выгрузить в Excel: сводка, смены, чеки, должники и остатки. За какой период?', [
+          [{ text: 'Последние 7 дней', callback_data: 'o:xp:7' }],
+          [{ text: 'Этот месяц', callback_data: 'o:xp:cur' }, { text: 'Прошлый месяц', callback_data: 'o:xp:prev' }], CANCEL_ROW]);
+      }
       if (st.flow === 'stock') return deps.send(R().stockText(S.stock(view), view.ctx.now));
       if (st.flow === 'debtors') return deps.send(R().debtorsText(S.debtors(view)));
       if (st.flow === 'period') {
@@ -438,7 +449,15 @@ var ChatFlows = (function () {
         var range = Owner.range(view.ctx.now.slice(0, 10), data.slice(5));
         var names = { staff: {} };
         view.rows('staff').forEach(function (x) { names.staff[x.staff_id] = x.name; });
-        return deps.send(R().periodText(S.period(view, range[0], range[1]), names));
+        var pr = S.prevRange(range[0], range[1]);
+        return deps.send(R().periodText(S.period(view, range[0], range[1]), names,
+          { prev: S.period(view, pr[0], pr[1]), top: S.top(view, range[0], range[1], 5) }));
+      }
+      if (st.flow === 'export' && data.indexOf('o:xp:') === 0) {
+        deps.state.clear();
+        var xr = Owner.range(view.ctx.now.slice(0, 10), data.slice(5));
+        deps.send('Готовлю файл за ' + xr[0].split('-').reverse().join('.') + ' — ' + xr[1].split('-').reverse().join('.') + '…');
+        return deps.exportExcel(xr[0], xr[1]);
       }
       if (st.flow === 'report' && data.indexOf('o:r:') === 0) {
         deps.state.clear();
