@@ -404,3 +404,15 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 .fielderr { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 12px; align-items: flex-start;
   background: rgba(255, 154, 154, .14); border: 1px solid rgba(255, 154, 154, .5); }
 .fielderr .error { font-size: 14px; font-weight: 600; }
+
+/* Шапка — кнопка «на главную». */
+.top { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.top:active { opacity: .8; }
+
+/* Экран продажи: без анимаций, шрифт чуть меньше. */
+body.on-sale .petals { display: none; }
+body.on-sale *, body.on-sale *::before, body.on-sale *::after { animation: none !important; }
+body.on-sale #app { font-size: 14px; }
+body.on-sale #app .h1 { font-size: 24px; }
+body.on-sale #app .card, body.on-sale #app .tile, body.on-sale #app .chip, body.on-sale #app .btn,
+body.on-sale #app .input, body.on-sale #app .search { font-size: 14px; }

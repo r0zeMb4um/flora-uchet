@@ -587,6 +587,16 @@
     tg.BackButton.offClick(goMain);
     if (on) { tg.BackButton.onClick(goMain); tg.BackButton.show(); } else tg.BackButton.hide();
   }
+  (function () {
+    var logo = document.querySelector('.top');
+    if (!logo) return;
+    logo.setAttribute('role', 'button');
+    logo.setAttribute('tabindex', '0');
+    logo.setAttribute('aria-label', 'На главную');
+    function home() { if (state.data && state.screen !== 'main') goMain(); }
+    logo.addEventListener('click', home);
+    logo.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); home(); } });
+  })();
   function goMain() {
     // Владелица возвращается в свои разделы, флорист — на главную кассы.
     if (state.data && state.data.me.role === 'owner') { openScreen(state.screen === 'owner_shift' ? 'owner_history' : 'owner_today'); return; }
@@ -638,8 +648,11 @@
     else renderMain();
     renderNav();
     updateNet();
+    // Экран продажи — спокойный: без анимаций и чуть мельче шрифт.
+    document.body.classList.toggle('on-sale', state.screen === 'sale');
     // Плавное появление — только при переходе на другой экран, не при каждом нажатии.
-    if (app.getAttribute('data-shown') !== state.screen) {
+    if (state.screen === 'sale') { app.setAttribute('data-shown', 'sale'); app.classList.remove('enter'); }
+    else if (app.getAttribute('data-shown') !== state.screen) {
       app.setAttribute('data-shown', state.screen);
       app.classList.remove('enter');
       void app.offsetWidth;
