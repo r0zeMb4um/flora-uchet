@@ -174,3 +174,38 @@ test('отмена продажи флористом: в списке «можн
   assert.equal(call(777, { action: 'bootstrap' }).catalog.find((x) => x.item_id === 'rose').stock, 49); // 50 − 1 (чек b)
   assert.throws(() => post(777, 'cancel', { receipt_id: a.data.result.receipt_id, reason: 'ещё раз' }), { code: 'UNKNOWN_RECEIPT' });
 });
+
+// ---------- этап 4: открытие смены и отмена предзаказа — в кассе ----------
+
+test('открытие смены в кассе: открытая информация (остаток прошлой смены, напарники), своё место подставляет сервер, расхождение — владелице', () => {
+  const { call, post, store } = shop();
+  store.seed('staff', [{ staff_id: 's_mira', client_id: 'c1', point_id: 'p1', telegram_id: '888', name: 'Мира', role: 'florist', shift_rate: 5000, pct_bp: 300, active: true }]);
+  const info = call(777, { action: 'bootstrap' }).open_info;
+  assert.deepEqual(info, { prev_cash: 0, partners: [{ staff_id: 's_mira', name: 'Мира' }] });
+  assert.equal(call(1, { action: 'bootstrap' }).open_info, null, 'владелица смену не открывает');
+  assert.throws(() => post(1, 'open_shift', { florist_ids: ['s_anna'], open_cash: 0 }), { code: 'FORBIDDEN' });
+  const res = post(777, 'open_shift', { florist_ids: ['', 's_mira'], open_cash: 300 });
+  assert.equal(res.data.result.shift_no, 1);
+  assert.equal(res.data.result.open_diff, 300);
+  assert.ok(res.notify.some((n) => n.kind === 'open_diff'));
+  assert.deepEqual(store.tables.shift_staff.map((r) => r.staff_id).sort(), ['s_anna', 's_mira']);
+  assert.equal(call(777, { action: 'bootstrap' }).open_info, null, 'смена открыта — подсказка не нужна');
+  assert.throws(() => post(777, 'open_shift', { florist_ids: [''], open_cash: 0 }), { code: 'SHIFT_ALREADY_OPEN' });
+});
+
+test('предзаказ: владелица отменяет в кассе — аванс возвращается, собранный букет возвращается на склад; флорист не может', () => {
+  const { call, post, store, owner, seedPost } = shop();
+  seedPost(owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 50 }] });
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  const pre = post(777, 'preorder', { customer: { new_customer: { name: 'Дана', confirm_new: true } }, pickup_date: '2026-11-09', price: 6000, payments: [{ method: 'cash', amount: 2000 }] });
+  const id = pre.data.result.receipt_id;
+  post(777, 'preorder_assemble', { receipt_id: id, items: [{ item_id: 'rose', qty: 4 }] });
+  assert.equal(call(777, { action: 'bootstrap' }).catalog.find((c) => c.item_id === 'rose').stock, 46);
+  assert.throws(() => post(777, 'preorder_cancel', { receipt_id: id, reason: 'х' }), { code: 'FORBIDDEN' });
+  const p = call(1, { action: 'bootstrap' }).preorders[0];
+  assert.deepEqual([p.customer, p.paid, p.assembly_status], ['Дана', 2000, 'assembled']);
+  post(1, 'preorder_cancel', { receipt_id: id, reason: 'клиент передумал', refund: { method: 'cash', amount: 2000 }, return_stock: true });
+  assert.equal(call(777, { action: 'bootstrap' }).catalog.find((c) => c.item_id === 'rose').stock, 50);
+  assert.equal(call(1, { action: 'bootstrap' }).preorders.length, 0);
+  assert.equal(store.tables.receipts.find((r) => r.receipt_id === id).assembly_status, 'cancelled');
+});

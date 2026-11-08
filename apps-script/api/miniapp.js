@@ -13,7 +13,7 @@ var MiniApi = (function () {
     sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
     preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
     inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true,
-    debt_repay: true, cancel: true
+    debt_repay: true, cancel: true, open_shift: true
   };
 
   function apiError(code, message) {
@@ -90,8 +90,19 @@ var MiniApi = (function () {
     var hits = Object.keys(sold).filter(function (id) { return sold[id] > 0; })
       .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 8);
     var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
+    // Для открытия смены: сколько оставила прошлая смена и кто может работать вместе.
+    var openInfo = null;
+    if (!shift && staff.role === 'florist') {
+      var closed = view.rows('shifts').filter(function (s) { return s.status === 'closed'; })
+        .sort(function (a, b) { return a.closed_at < b.closed_at ? -1 : 1; });
+      openInfo = {
+        prev_cash: closed.length ? closed[closed.length - 1].next_cash : 0,
+        partners: view.rows('staff').filter(function (s) { return s.role === 'florist' && s.active === true && s.staff_id !== staff.staff_id; })
+          .map(function (s) { return { staff_id: s.staff_id, name: s.name }; })
+      };
+    }
     return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
-      shift: shiftInfo, catalog: catalog, templates: templates, hits: hits,
+      shift: shiftInfo, open_info: openInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
 
@@ -122,7 +133,8 @@ var MiniApi = (function () {
 
   var OWNER_KINDS = {
     correction: true, anonymize: true, catalog_edit: true, new_item: true,
-    staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true
+    staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
+    preorder_cancel: true
   };
 
   /** Одноразовый токен приглашения (не короче 16 символов). */
@@ -334,6 +346,10 @@ var MiniApi = (function () {
       var allowed = staff.role === 'florist' ? FLORIST_KINDS[body.kind] : staff.role === 'owner' ? OWNER_KINDS[body.kind] : false;
       if (!allowed) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
       var payload = body.payload || {};
+      // Открытие смены: пустое место в составе — это сам флорист (ID берётся из проверенного входа, не из запроса).
+      if (staff.role === 'florist' && body.kind === 'open_shift' && Array.isArray(payload.florist_ids)) {
+        payload = Object.assign({}, payload, { florist_ids: payload.florist_ids.map(function (id) { return id || staff.staff_id; }) });
+      }
       // Токен приглашения создаёт сервер: касса его не присылает и не знает.
       if (staff.role === 'owner' && (body.kind === 'staff_add' || body.kind === 'staff_invite')) {
         payload = Object.assign({}, payload, { invite_token: newToken() });

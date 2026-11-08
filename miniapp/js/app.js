@@ -858,25 +858,26 @@
       openScreen(OWNER_BACK[state.screen] || (state.screen === 'owner_shift' ? 'owner_history' : state.screen === 'owner_manage' ? 'owner_today' : 'owner_today'));
       return;
     }
-    state.screen = 'main'; render();
+    state.screen = FLORIST_BACK[state.screen] || 'main'; render();
   }
+  var FLORIST_BACK = { income: 'more', defect: 'more', refund: 'more', cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more' };
 
   // ---------- нижнее меню ----------
 
   var NAV_OF = {
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
-    cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more',
+    cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more', open: 'main',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
     owner_period: 'owner_period', owner_debtors: 'owner_debtors',
     owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
-    owner_expenses: 'owner_manage', owner_settings: 'owner_manage'
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
     owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
-    owner_expenses: 'owner_manage', owner_settings: 'owner_manage'
+    owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders'
   };
   function renderNav() {
     var nav = document.getElementById('nav');
@@ -961,8 +962,8 @@
       el('div', { class: 'muted', text: s ? 'Смена №' + s.shift_no + ' · с ' + String(s.opened_at).slice(11, 16) + (s.florists.length > 1 ? ' · ' + s.florists.map(firstName).join(' и ') : '') : 'Пусть день будет полон красоты' })
     ])];
     if (!s) {
-      nodes.push(emptyState('Смена ещё не открыта', 'Откройте её в чате бота кнопкой «Открыть смену» — касса сразу оживёт.',
-        tg ? { label: 'Перейти в чат', onclick: function () { tg.close(); } } : null));
+      nodes.push(emptyState('Смена ещё не открыта', d.open_info ? 'Примите кассу и откройте смену — касса сразу оживёт.' : 'Смену открывает флорист.',
+        d.open_info ? { label: 'Открыть смену', onclick: function () { openScreen('open'); } } : null));
     } else if (!s.on_shift) {
       nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
     } else {
@@ -2138,6 +2139,7 @@
         tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog'),
         tile('users', 'Сотрудники', 'флористы, ставки, приглашения', 'owner_team'),
         tile('receipt', 'Расходы месяца', 'аренда, налоги и др.', 'owner_expenses'),
+        tile('calendar-heart', 'Предзаказы', 'список и отмена', 'owner_preorders'),
         tile('adjustments', 'Настройки', 'размен, напоминание, статьи', 'owner_settings')
       ])
     );
@@ -2179,6 +2181,85 @@
         chips(cats, f.cat, function (k) { f.cat = k; render(); })
       ].concat(rows.length ? rows : [emptyState('Ничего не найдено', 'Измените поиск или категорию')]));
     });
+  };
+
+  // ---------- открытие смены (флорист) ----------
+
+  SCREENS.open = function () {
+    backButton(true);
+    var f = state.form;
+    var info = state.data.open_info;
+    if (!info) { state.screen = 'main'; render(); return; }
+    if (f.cash === undefined) { f.cash = String(info.prev_cash); f.partner = ''; }
+    function upd() {
+      var cash = intOf(f.cash);
+      var diff = cash === null ? null : cash - info.prev_cash;
+      var note = document.getElementById('open-diff');
+      if (note) note.textContent = diff ? 'Расхождение с тем, что оставила прошлая смена: ' + (diff > 0 ? '+' : '−') + money(Math.abs(diff)) + '. Владелица получит сообщение.' : '';
+      mainButton(state.sending ? 'Открываем…' : 'Открыть смену', cash !== null && !state.sending, function () {
+        var ids = f.partner ? ['', f.partner] : ['']; // пустое место — сам флорист, его ID подставит сервер
+        submitOp('open_shift', { florist_ids: ids, open_cash: cash }, 'Смена открыта', function () { state.screen = 'main'; render(); });
+      });
+    }
+    app.replaceChildren(
+      title('Открытие смены', 'Прошлая смена оставила в кассе ' + money(info.prev_cash) + ' (размен внутри)'),
+      formField('Сколько наличных в кассе сейчас, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.cash, oninput: function (e) { f.cash = e.target.value; upd(); } }),
+        'Пересчитайте деньги. Если сумма другая — впишите её, владелица увидит расхождение.'),
+      el('div', { id: 'open-diff', class: 'muted', style: 'min-height:18px' }),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Кто работает в смене' }),
+        chips([['', 'Только я']].concat(info.partners.map(function (p) { return [p.staff_id, 'Со мной ' + p.name]; })), f.partner, function (k) { f.partner = k; render(); })])
+    );
+    upd();
+  };
+
+  // ---------- владелица: предзаказы и отмена (D24) ----------
+
+  SCREENS.owner_preorders = function () {
+    backButton(true);
+    mainButton(null);
+    var list = state.data.preorders || [];
+    var rows = list.map(function (p) {
+      return el('button', { class: 'card', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left;display:block;width:100%',
+        onclick: function () { openScreen('owner_preorder', { p: p }); } }, [
+        el('div', { class: 'sum' }, [el('b', { text: p.pickup_date.slice(8, 10) + '.' + p.pickup_date.slice(5, 7) + ' · ' + (p.customer || 'без имени') }), el('span', { class: 'num', text: money(p.total) })]),
+        el('div', { class: 'muted num', text: (p.assembly_status === 'assembled' ? 'собран' : 'не собран') + ' · внесено ' + money(p.paid) + ' · к доплате ' + money(Math.max(0, p.unpaid)) })
+      ]);
+    });
+    app.replaceChildren.apply(app, [title('Предзаказы', 'Нажмите на заказ, чтобы отменить')]
+      .concat(rows.length ? rows : [emptyState('Активных предзаказов нет', 'Новые предзаказы оформляет флорист.')]));
+  };
+
+  SCREENS.owner_preorder = function () {
+    backButton(true);
+    var f = state.form;
+    var p = f.p;
+    if (!p) { openScreen('owner_preorders'); return; }
+    var shiftOpen = !!(state.data.shift);
+    if (f.refund === undefined) { f.refund = p.paid > 0 ? (shiftOpen ? 'cash' : 'card') : 'keep'; f.stock = p.assembly_status === 'assembled' ? '1' : '0'; f.reason = ''; }
+    function upd() {
+      var ok = f.reason.trim().length >= 3;
+      mainButton(state.sending ? 'Отменяем…' : 'Отменить предзаказ', ok && !state.sending, function () {
+        askOk('Отменить предзаказ ' + (p.customer || '') + ' на ' + money(p.total) + '?', function () {
+          var payload = { receipt_id: p.receipt_id, reason: f.reason.trim(), return_stock: f.stock === '1' && p.assembly_status === 'assembled' };
+          if (f.refund !== 'keep' && p.paid > 0) payload.refund = { method: f.refund, amount: p.paid };
+          submitOp('preorder_cancel', payload, 'Предзаказ отменён', function () { openScreen('owner_preorders'); });
+        });
+      });
+    }
+    var nodes = [title((p.customer || 'Предзаказ') + ' · ' + money(p.total), 'Внесено ' + money(p.paid) + ' · ' + (p.assembly_status === 'assembled' ? 'букет собран' : 'не собран'))];
+    if (p.paid > 0) {
+      var opts = [];
+      if (shiftOpen) opts.push(['cash', 'Вернуть ' + money(p.paid) + ' наличными из кассы']);
+      opts.push(['card', 'Вернуть ' + money(p.paid) + ' на карту'], ['keep', 'Аванс остаётся магазину']);
+      nodes.push(el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Что с авансом' }), chips(opts, f.refund, function (k) { f.refund = k; render(); })]));
+    }
+    if (p.assembly_status === 'assembled') {
+      nodes.push(el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Собранный букет' }),
+        chips([['1', 'Вернуть цветы на склад'], ['0', 'Не возвращать (списан)']], f.stock, function (k) { f.stock = k; render(); })]));
+    }
+    nodes.push(formField('Причина отмены', el('input', { class: 'input', value: f.reason, maxlength: '200', placeholder: 'например: клиент передумал', oninput: function (e) { f.reason = e.target.value; upd(); } })));
+    app.replaceChildren.apply(app, nodes);
+    upd();
   };
 
   /** Одно поле формы: подпись + ввод. */

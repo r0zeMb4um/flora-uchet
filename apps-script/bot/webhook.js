@@ -173,22 +173,22 @@ var Webhook = (function () {
     var shift = view.openShift();
     var lines = [];
     if (greet) lines.push('Здравствуйте, ' + Tg.esc(me.name) + '!');
-    var keyboard;
-    if (me.role === 'owner') {
-      lines.push(shift ? 'Сейчас открыта смена №' + shift.shift_no + '.' : 'Открытой смены нет.');
-      lines.push('Отчёт приходит сам после закрытия смены.');
-      keyboard = [['Отчёт за смену', 'Отчёт за период'], ['Остатки', 'Закупка'], ['Должники', 'Предзаказы'], ['Каталог', 'Сотрудники'], ['Расходы месяца', 'Выгрузка в Excel'], ['Настройки']];
-    } else if (shift && view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === me.staff_id; })) {
-      lines.push('Открыта смена №' + shift.shift_no + '. Продажи и закрытие — в кассе: кнопка «Касса» слева от поля ввода.');
-      keyboard = [['Расход', 'Владелица забрала'], ['Погашение долга', 'Отменить продажу'], ['Передать смену']];
-    } else if (shift) {
-      lines.push('Открыта смена №' + shift.shift_no + ' — вы в ней не работаете.');
-      keyboard = [['Меню']];
-    } else {
-      lines.push('Смена не открыта.');
-      keyboard = [['Открыть смену']];
+    var cashButton = [[{ text: 'Открыть кассу', web_app: { url: MINIAPP_URL } }]];
+    if (me.role === 'owner' || me.role === 'florist') {
+      // D29: всё управление и работа смены — в кассе. Чат — для отчётов, напоминаний и срочных сообщений.
+      if (me.role === 'owner') {
+        lines.push(shift ? 'Сейчас открыта смена №' + shift.shift_no + '.' : 'Открытой смены нет.');
+        lines.push('Отчёт приходит сам после закрытия смены. Склад, сотрудники, расходы и отчёты — в кассе.');
+      } else if (shift && view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === me.staff_id; })) {
+        lines.push('Открыта смена №' + shift.shift_no + '. Всё — в кассе.');
+      } else if (shift) {
+        lines.push('Открыта смена №' + shift.shift_no + ' — вы в ней не работаете.');
+      } else {
+        lines.push('Смена не открыта. Откройте её в кассе.');
+      }
+      return Tg.send(chatId, lines.join('\n'), { reply_markup: { keyboard: cashButton, resize_keyboard: true } });
     }
-    Tg.send(chatId, lines.join('\n'), { reply_markup: { keyboard: keyboard, resize_keyboard: true } });
+    Tg.send(chatId, (lines.join('\n') || 'Откройте кассу.'), { reply_markup: { keyboard: cashButton, resize_keyboard: true } });
   }
 
   // ---------- уведомления и ошибки ----------
