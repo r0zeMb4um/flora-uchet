@@ -381,3 +381,15 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 
 /* Атрибут hidden должен скрывать всегда — иначе display:flex у меню и панели итога его перебивает. */
 [hidden] { display: none !important; }
+
+/* Подтверждение крупной суммы. */
+.confirm { position: fixed; inset: 0; z-index: 35; display: flex; align-items: flex-end; background: rgba(8, 24, 28, .6);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); animation: kp-in .15s ease; }
+.confirm--out { opacity: 0; transition: opacity .18s; }
+.confirm__card { width: 100%; max-width: 560px; margin: 0 auto; padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 26px 26px 0 0; background: rgba(22, 57, 64, .96); border-top: 1px solid var(--glass-line);
+  display: flex; flex-direction: column; gap: 10px; text-align: center; animation: kp-up .22s ease; }
+.confirm__sum { font-size: 52px; font-weight: 700; letter-spacing: -1px; color: var(--rose-soft); }
+.confirm__why { color: var(--gold); font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
+.tpl--again { border-style: dashed; }
+.tpl--again i.ti { font-size: 26px; color: var(--rose-soft); }

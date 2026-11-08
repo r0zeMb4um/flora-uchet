@@ -87,7 +87,7 @@ var MiniApi = (function () {
       if (m.type === 'sale' && String(m.created_at).slice(0, 10) >= cut) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
     });
     var hits = Object.keys(sold).filter(function (id) { return sold[id] > 0; })
-      .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 3);
+      .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 8);
     var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
     return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
       shift: shiftInfo, catalog: catalog, templates: templates, hits: hits,

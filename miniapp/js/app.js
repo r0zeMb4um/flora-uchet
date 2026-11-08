@@ -17,6 +17,8 @@
   var app = document.getElementById('app');
   var DRAFT_KEY = 'flora.sale.draft.v1';
   var CATS = { flowers: 'Цветы', greens: 'Зелень', toys: 'Игрушки', baskets: 'Корзины', packaging: 'Упаковка' };
+  var LAST_KEY = 'flora.last.v1';
+  var LARGE_SUM = 50000; // с этой суммы «Провести» просит подтвердить
   var CAT_ICON = { flowers: 'flower', greens: 'leaf', toys: 'gift', baskets: 'basket', packaging: 'package' };
 
   var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false };
@@ -457,7 +459,7 @@
   function haptic(kind) {
     try {
       if (!tg || !tg.HapticFeedback) return;
-      if (kind === 'light') tg.HapticFeedback.impactOccurred('light');
+      if (kind === 'light' || kind === 'heavy') tg.HapticFeedback.impactOccurred(kind);
       else tg.HapticFeedback.notificationOccurred(kind);
     } catch (e) { /* не важно */ }
   }
@@ -709,16 +711,22 @@
     var cats = ['all'].concat(Object.keys(CATS).filter(function (k) {
       return state.data.catalog.some(function (c) { return c.category === k; });
     }));
-    var q = state.query.trim().toLowerCase();
-    var list = state.data.catalog.filter(function (c) {
-      return (state.cat === 'all' || c.category === state.cat) && (!q || c.name.toLowerCase().indexOf(q) >= 0);
-    });
+    var hits = state.data.hits || [];
+    // Пока флорист сам не выбрал раздел, открываем «Частые» — если уже есть что показать.
+    if (!state.catChosen && hits.length && state.cat === 'all') state.cat = 'hot';
+    if (state.cat === 'hot' && !hits.length) state.cat = 'all';
+    if (hits.length) cats.splice(1, 0, 'hot');
+    function visible(c, qq) {
+      if (qq) return c.name.toLowerCase().indexOf(qq) >= 0; // поиск идёт по всему каталогу
+      return state.cat === 'all' || (state.cat === 'hot' ? hits.indexOf(c.item_id) >= 0 : c.category === state.cat);
+    }
 
     var typeChips = el('div', { class: 'chips' }, [['sale', 'Продажа'], ['bouquet', 'Букет']].map(function (t) {
       return el('button', { class: 'chip', 'aria-pressed': String(d.type === t[0]), onclick: function () { d.type = t[0]; saveDraft(); renderSale(); } }, [t[1]]);
     }));
     var catChips = el('div', { class: 'chips' }, cats.map(function (k) {
-      return el('button', { class: 'chip', 'aria-pressed': String(state.cat === k), onclick: function () { state.cat = k; renderSale(); } }, [k === 'all' ? 'Все' : CATS[k]]);
+      return el('button', { class: 'chip', 'aria-pressed': String(state.cat === k), onclick: function () { state.cat = k; state.catChosen = true; renderSale(); } },
+        [k === 'all' ? 'Все' : k === 'hot' ? 'Частые' : CATS[k]]);
     }));
     var search = el('input', { class: 'search', type: 'search', placeholder: 'Поиск позиции', value: state.query,
       oninput: function (e) { state.query = e.target.value; renderTilesOnly(); } });
@@ -726,9 +734,9 @@
     var tiles = el('div', { class: 'tiles', id: 'tiles' });
     function renderTilesOnly() {
       var qq = state.query.trim().toLowerCase();
-      var l = state.data.catalog.filter(function (c) {
-        return (state.cat === 'all' || c.category === state.cat) && (!qq || c.name.toLowerCase().indexOf(qq) >= 0);
-      });
+      var l = state.data.catalog.filter(function (c) { return visible(c, qq); });
+      // «Частые» в порядке продаж.
+      if (!qq && state.cat === 'hot') l.sort(function (a, b) { return hits.indexOf(a.item_id) - hits.indexOf(b.item_id); });
       tiles.replaceChildren.apply(tiles, l.map(tile));
       if (!l.length) tiles.replaceChildren(el('div', { class: 'muted', style: 'grid-column:1/-1;text-align:center;padding:18px 0', text: 'Ничего не нашлось — проверьте название или выберите «Все»' }));
     }
@@ -737,7 +745,7 @@
       var low = c.stock < c.min;
       var short = state.shortage && state.shortage[c.item_id];
       var badges = [];
-      if ((state.data.hits || []).indexOf(c.item_id) >= 0) badges.push(el('span', { class: 'badge badge--hit', text: 'хит' }));
+      if ((state.data.hits || []).slice(0, 3).indexOf(c.item_id) >= 0) badges.push(el('span', { class: 'badge badge--hit', text: 'хит' }));
       if (low) badges.push(el('span', { class: 'badge badge--low', text: 'мало · ' + c.stock }));
       if (c.review) badges.push(el('span', { class: 'badge badge--new', text: 'новое' }));
       return el('div', { class: 'tile' + (qty ? ' tile--on' : '') + (short ? ' tile--short' : '') }, [
@@ -844,14 +852,19 @@
     renderBottom();
 
     var tpls = state.data.templates || [];
-    var tplRow = el('div', { class: 'tpls' }, tpls.map(function (t) {
+    var last = store(LAST_KEY);
+    var lastOk = last && last.items && last.items.length && !Object.keys(d.cart).length;
+    var tplRow = el('div', { class: 'tpls' }, (lastOk ? [el('button', { class: 'tpl tpl--again', onclick: function () {
+      applyTemplate({ name: 'последняя продажа', items: last.items, price: last.price, type: last.type });
+    } }, [icon('repeat'), el('div', { class: 'tpl__name', text: 'Повторить последнюю' }),
+      el('div', { class: 'muted num', style: 'font-size:12px', text: last.items.reduce(function (a, x) { return a + x.qty; }, 0) + ' шт · ' + money(last.price) })])] : []).concat(tpls.map(function (t) {
       var count = t.items.reduce(function (a, x) { return a + x.qty; }, 0);
       return el('button', { class: 'tpl', onclick: function () { applyTemplate(t); } }, [
         el('img', { src: 'img/ranunculus.svg', width: '40', height: '40', alt: '' }),
         el('div', { class: 'tpl__name', text: t.name }),
         el('div', { class: 'muted num', style: 'font-size:12px', text: count + ' шт · ' + money(t.price) })
       ]);
-    }).concat(Object.keys(d.cart).length ? [el('button', { class: 'tpl tpl--add', onclick: saveTemplate }, [icon('plus'), el('div', { class: 'tpl__name', text: 'Сохранить как шаблон' })])] : []));
+    })).concat(Object.keys(d.cart).length ? [el('button', { class: 'tpl tpl--add', onclick: saveTemplate }, [icon('plus'), el('div', { class: 'tpl__name', text: 'Сохранить как шаблон' })])] : []));
     function applyTemplate(t) {
       haptic('light');
       var short = {};
@@ -862,7 +875,7 @@
         if (have < x.qty) short[x.item_id] = { need: x.qty, have: have };
         if (have > 0) d.cart[x.item_id] = Math.min(x.qty, have);
       });
-      d.type = 'bouquet';
+      d.type = t.type || 'bouquet';
       d.price = String(t.price);
       state.shortage = Object.keys(short).length ? short : null;
       saveDraft();
@@ -894,7 +907,7 @@
       tplRow.after(naming);
       nameInput.focus();
     }
-    var nodes = [typeChips, tpls.length || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
+    var nodes = [typeChips, tpls.length || lastOk || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
     nodes.push(sumbar);
     if (!tg) nodes.push(el('button', { class: 'btn btn--primary fallback-main', id: 'fallback', onclick: submit }, ['Провести']));
     app.replaceChildren.apply(app, nodes);
@@ -1783,10 +1796,45 @@
 
   // ---------- проведение ----------
 
+  /** Нужно ли переспросить: крупная сумма или цена сильно отличается от каталога (похоже на лишний ноль). */
+  function sureReasons(sm) {
+    var why = [];
+    if (sm.total >= LARGE_SUM) why.push('Крупная сумма — проверьте, что цифры верные.');
+    if (sm.sum > 0 && sm.price >= sm.sum * 5 && sm.price - sm.sum >= 5000) why.push('Цена в ' + Math.round(sm.price / sm.sum) + ' раз выше каталожной (' + money(sm.sum) + ') — нет лишнего нуля?');
+    if (sm.sum >= 5000 && sm.price * 5 <= sm.sum) why.push('Цена в ' + Math.round(sm.sum / sm.price) + ' раз ниже каталожной (' + money(sm.sum) + ').');
+    return why;
+  }
+  function confirmSale(sm, how, why, onOk) {
+    if (document.querySelector('.confirm')) return;
+    haptic('warning');
+    var close = function () { box.classList.add('confirm--out'); setTimeout(function () { box.remove(); }, 180); };
+    var box = el('div', { class: 'confirm', role: 'alertdialog', 'aria-label': 'Подтвердите сумму' }, [
+      el('div', { class: 'confirm__card' }, [
+        el('div', { class: 'script', style: 'font-size:30px', text: 'Проверьте сумму' }),
+        el('div', { class: 'confirm__sum num', text: money(sm.total) }),
+        el('div', { class: 'muted', text: how }),
+        el('div', { class: 'confirm__why' }, why.map(function (t) { return el('div', { text: '⚠️ ' + t }); })),
+        el('button', { class: 'btn btn--primary btn--action', onclick: function () { close(); haptic('heavy'); onOk(); } }, [icon('check'), 'Провести ' + money(sm.total)]),
+        el('button', { class: 'btn', onclick: close }, ['Изменить'])
+      ])
+    ]);
+    document.body.appendChild(box);
+  }
+
   function submit() {
     var d = draft();
     var sm = summary(d);
     if (!sm.payload || state.sending) return;
+    var why = sureReasons(sm);
+    if (why.length) {
+      var how = { cash: 'наличными', card: 'безналом', mixed: 'нал + безнал', debt: 'в долг' }[d.pay] || '';
+      return confirmSale(sm, (d.type === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + how, why, function () { doSubmit(d, sm); });
+    }
+    doSubmit(d, sm);
+  }
+
+  function doSubmit(d, sm) {
+    if (state.sending) return;
     state.sending = true;
     if (tg) tg.MainButton.showProgress(false);
     render();
@@ -1807,6 +1855,7 @@
           items: sm.payload.items.map(function (x) { return { name: names[x.item_id] || x.item_id, qty: x.qty }; }),
           when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16).replace('T', ' ').split(' ').map(function (v, i) { return i ? v : v.split('-').reverse().join('.'); }).join(' · ')
         };
+        store(LAST_KEY, { type: d.type, price: sm.payload.price, items: sm.payload.items });
         state.shortage = null;
         state.screen = 'main';
       })
