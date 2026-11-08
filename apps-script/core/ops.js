@@ -845,6 +845,39 @@ var Ops = (function () {
     plan.result = { set: set };
   };
 
+  // ---------- шаблоны букетов (быстрая продажа) ----------
+
+  /** Сохранить букет как шаблон: название, состав, цена. Флорист смены или владелица. */
+  H.template_save = function (view, p, plan) {
+    var isOwner = view.ctx.role === 'owner' || view.ctx.role === 'admin';
+    if (!isOwner) requireShift(view, plan);
+    var name = text(p.name, 'название букета', 40);
+    var items = list(p.items, 'состав').map(function (l) {
+      activeItem(view, l.item_id);
+      return { item_id: l.item_id, qty: posInt(l.qty, 'количество') };
+    });
+    var dup = view.rows('bouquet_templates').some(function (t) {
+      return t.status === 'active' && String(t.name).toLowerCase() === name.toLowerCase();
+    });
+    if (dup) throw opsError('DUPLICATE', 'Шаблон с таким названием уже есть');
+    var id = 'tpl-' + plan.op_id;
+    add(plan, view, 'bouquet_templates', {
+      template_id: id, name: name, items_json: JSON.stringify(items), price: posInt(p.price, 'цена'),
+      status: 'active', created_by: view.ctx.staff_id
+    });
+    plan.result = { template_id: id };
+  };
+
+  /** Убрать шаблон из кассы: владелица или тот, кто его создал. */
+  H.template_hide = function (view, p, plan) {
+    var t = view.rows('bouquet_templates').filter(function (x) { return x.template_id === p.template_id; })[0];
+    if (!t || t.status !== 'active') throw opsError('NOT_FOUND', 'Шаблон не найден');
+    var isOwner = view.ctx.role === 'owner' || view.ctx.role === 'admin';
+    if (!isOwner && t.created_by !== view.ctx.staff_id) throw opsError('FORBIDDEN', 'Убрать шаблон может владелица или его автор');
+    update(plan, 'bouquet_templates', { template_id: t.template_id }, t, { status: 'hidden' });
+    plan.result = { template_id: t.template_id };
+  };
+
   H.owner_expense = function (view, p, plan) {
     requireOwner(view);
     var month = p.month;

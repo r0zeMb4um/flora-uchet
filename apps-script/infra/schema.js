@@ -36,6 +36,7 @@ var Schema = (function () {
     stock_balance: cols('client_id point_id item_id qty:n last_op_id updated_at'),
     cash_ops: cols('cash_id client_id point_id shift_id type amount:n staff_id comment' + META),
     owner_expenses: cols('expense_id client_id point_id month item amount:n comment created_by' + META),
+    bouquet_templates: cols('template_id client_id name items_json price:n status created_by' + META),
     audit: cols('ts actor_telegram_id action details_json')
   };
 

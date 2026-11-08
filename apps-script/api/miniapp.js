@@ -12,7 +12,7 @@ var MiniApi = (function () {
   var FLORIST_KINDS = {
     sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
     preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
-    inventory: true, cash_out: true, withdrawal: true, close_shift: true
+    inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true
   };
 
   function apiError(code, message) {
@@ -77,7 +77,18 @@ var MiniApi = (function () {
     var reservations = view.rows('reservations').filter(function (r) { return r.status === 'active'; }).map(function (r) {
       return { reservation_id: r.reservation_id, customer: names[r.customer_id] || '', pickup_date: r.pickup_date, total: r.total };
     }).sort(function (a, b) { return a.pickup_date < b.pickup_date ? -1 : 1; });
-    return { me: { name: staff.name, role: staff.role }, shift: shiftInfo, catalog: catalog,
+    // Шаблоны букетов и «хиты» — позиции, которых больше всего продали за 30 дней.
+    var templates = view.rows('bouquet_templates').filter(function (t) { return t.status === 'active'; }).map(function (t) {
+      return { template_id: t.template_id, name: t.name, items: JSON.parse(t.items_json || '[]'), price: t.price, mine: t.created_by === staff.staff_id };
+    }).sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+    var cut = new Date(Date.parse(now) - 30 * 86400000 + 5 * 3600000).toISOString().slice(0, 10);
+    var sold = {};
+    view.rows('stock_moves').forEach(function (m) {
+      if (m.type === 'sale' && String(m.created_at).slice(0, 10) >= cut) sold[m.item_id] = (sold[m.item_id] || 0) - m.qty;
+    });
+    var hits = Object.keys(sold).filter(function (id) { return sold[id] > 0; })
+      .sort(function (a, b) { return sold[b] - sold[a]; }).slice(0, 3);
+    return { me: { name: staff.name, role: staff.role }, shift: shiftInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
 

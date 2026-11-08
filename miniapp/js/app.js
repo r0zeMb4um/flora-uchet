@@ -107,6 +107,78 @@
     setTimeout(function () { box.remove(); }, 1800);
   }
 
+  /**
+   * Клавиатура кассы: крупные клавиши, быстрые суммы, «Готово». Открывается поверх экрана снизу.
+   * opts: { title, value, quick: [суммы], add: true — быстрые суммы прибавляются, иначе заменяют; onDone(value) }
+   */
+  function keypad(opts) {
+    var val = String(opts.value == null ? '' : opts.value).replace(/\D/g, '');
+    var sheet = el('div', { class: 'kp', role: 'dialog', 'aria-label': opts.title || 'Ввод суммы' });
+    var shown = el('div', { class: 'kp__val num' });
+    var hint = el('div', { class: 'kp__hint muted' });
+    function draw() {
+      shown.textContent = val ? money(Number(val)) : '0 ₸';
+      hint.textContent = opts.hint ? opts.hint(val ? Number(val) : 0) : '';
+    }
+    function press(k) {
+      haptic('light');
+      if (k === '⌫') val = val.slice(0, -1);
+      else if (k === 'C') val = '';
+      else if (val.length < 9) val = (val === '0' ? '' : val) + k;
+      draw();
+    }
+    function close(ok) {
+      sheet.classList.add('kp--out');
+      setTimeout(function () { sheet.remove(); }, 180);
+      if (ok) opts.onDone(val === '' ? '' : String(Number(val)));
+    }
+    var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(function (k) {
+      return el('button', { class: 'kp__key' + (k === 'C' || k === '⌫' ? ' kp__key--fn' : ''), 'aria-label': k === '⌫' ? 'Стереть' : k === 'C' ? 'Очистить' : k,
+        onclick: function () { press(k); } }, [k]);
+    });
+    var quick = (opts.quick || []).map(function (q) {
+      return el('button', { class: 'chip', onclick: function () {
+        haptic('light');
+        val = String(opts.add ? (Number(val) || 0) + q : q);
+        draw();
+      } }, [(opts.add ? '+' : '') + money(q)]);
+    });
+    sheet.appendChild(el('div', { class: 'kp__panel' }, [
+      el('div', { class: 'sum' }, [el('div', { class: 'muted', text: opts.title || 'Сумма' }),
+        el('button', { class: 'kp__x', 'aria-label': 'Закрыть', onclick: function () { close(false); } }, [icon('x')])]),
+      shown, hint,
+      quick.length ? el('div', { class: 'chips' }, quick) : null,
+      el('div', { class: 'kp__grid' }, keys),
+      el('button', { class: 'btn btn--primary btn--action', onclick: function () { close(true); } }, [icon('check'), 'Готово'])
+    ]));
+    sheet.addEventListener('click', function (e) { if (e.target === sheet) close(false); });
+    document.body.appendChild(sheet);
+    draw();
+  }
+
+  /** Поле суммы, которое открывает клавиатуру кассы вместо системной. */
+  function amountField(label, value, opts) {
+    var btn = el('button', { class: 'input num amount', type: 'button' }, [value ? money(Number(value)) : el('span', { class: 'muted', text: opts.placeholder || 'нажмите, чтобы ввести' })]);
+    btn.onclick = function () {
+      keypad({ title: label, value: value, quick: opts.quick, add: opts.add, hint: opts.hint, onDone: opts.onDone });
+    };
+    return el('div', { class: 'field' }, [el('label', { text: label }), btn]);
+  }
+
+  /** Экран «Проведено» на секунду: галочка, сумма, способ оплаты. */
+  function showDone(amount, line, already) {
+    var box = el('div', { class: 'done', role: 'status' }, [
+      el('div', { class: 'done__check' }, [icon('check')]),
+      el('div', { class: 'done__title script', text: already ? 'Уже было проведено' : 'Проведено' }),
+      el('div', { class: 'done__sum num', text: money(amount) }),
+      line ? el('div', { class: 'muted', text: line }) : null
+    ]);
+    box.onclick = function () { box.remove(); };
+    document.body.appendChild(box);
+    setTimeout(function () { box.classList.add('done--out'); }, 1100);
+    setTimeout(function () { box.remove(); }, 1400);
+  }
+
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -123,7 +195,11 @@
     toast._t = setTimeout(function () { t.hidden = true; }, isError ? 5000 : 2500);
   }
   function haptic(kind) {
-    try { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(kind); } catch (e) { /* не важно */ }
+    try {
+      if (!tg || !tg.HapticFeedback) return;
+      if (kind === 'light') tg.HapticFeedback.impactOccurred('light');
+      else tg.HapticFeedback.notificationOccurred(kind);
+    } catch (e) { /* не важно */ }
   }
   function store(key, val) {
     try {
@@ -387,9 +463,19 @@
     function tile(c) {
       var qty = d.cart[c.item_id] || 0;
       var low = c.stock < c.min;
-      return el('div', { class: 'tile' + (qty ? ' tile--on' : '') }, [
+      var short = state.shortage && state.shortage[c.item_id];
+      var badges = [];
+      if ((state.data.hits || []).indexOf(c.item_id) >= 0) badges.push(el('span', { class: 'badge badge--hit', text: 'хит' }));
+      if (low) badges.push(el('span', { class: 'badge badge--low', text: 'мало · ' + c.stock }));
+      if (c.review) badges.push(el('span', { class: 'badge badge--new', text: 'новое' }));
+      return el('div', { class: 'tile' + (qty ? ' tile--on' : '') + (short ? ' tile--short' : '') }, [
         el('div', { class: 'tile__head' }, [catIcon(c.category), el('div', { class: 'tile__name', text: c.name })]),
-        el('div', { class: 'tile__meta num' + (low ? ' tile__meta--low' : ''), text: money(c.price) + ' · остаток ' + c.stock }),
+        badges.length ? el('div', { class: 'badges' }, badges) : null,
+        el('div', { class: 'tile__meta num', text: money(c.price) + ' · остаток ' + c.stock }),
+        short ? el('div', { class: 'short' }, [
+          el('div', { text: 'Не хватает: нужно ' + short.need + ', есть ' + short.have }),
+          el('button', { class: 'chip', onclick: function () { openScreen('income', { lines: [{ item_id: c.item_id, qty: '', cost: '' }] }); } }, [icon('truck-delivery'), ' Внести приход'])
+        ]) : null,
         el('div', { class: 'stepper' }, [
           el('button', { 'aria-label': 'Убрать ' + c.name, disabled: qty === 0, onclick: function () { change(c, -1); } }, ['−']),
           el('span', { class: 'stepper__qty num', text: String(qty) }),
@@ -410,8 +496,9 @@
     var bottom = el('div', { class: 'card', id: 'bottom' });
     function renderBottom() {
       var sm = summary(d);
-      var priceInput = el('input', { class: 'input num', inputmode: 'numeric', value: d.price == null ? (sm.sum || '') : d.price,
-        oninput: function (e) { d.price = e.target.value; saveDraft(); updateTotals(); } });
+      var priceField = amountField('Цена (можно поставить свою)', d.price == null ? (sm.sum || '') : d.price, {
+        quick: sm.sum ? [sm.sum, Math.ceil(sm.sum / 1000) * 1000, Math.ceil(sm.sum / 5000) * 5000].filter(function (v, i, a) { return a.indexOf(v) === i; }) : [1000, 5000, 10000],
+        onDone: function (v) { d.price = v; saveDraft(); renderBottom(); } });
       var discChips = el('div', { class: 'chips' }, [['none', 'Без скидки'], ['amount', 'Скидка ₸'], ['pct', 'Скидка %']].map(function (t) {
         return el('button', { class: 'chip', 'aria-pressed': String(d.disc === t[0]), onclick: function () { d.disc = t[0]; d.discVal = ''; saveDraft(); renderBottom(); } }, [t[1]]);
       }));
@@ -420,16 +507,22 @@
       var payChips = el('div', { class: 'chips' }, [['cash', 'Нал'], ['card', 'Безнал'], ['mixed', 'Нал + безнал'], ['debt', 'В долг']].map(function (t) {
         return el('button', { class: 'chip', 'aria-pressed': String(d.pay === t[0]), onclick: function () { d.pay = t[0]; d.cashPart = ''; saveDraft(); renderBottom(); } }, [t[1]]);
       }));
-      var cashInput = d.pay !== 'mixed' && d.pay !== 'debt' ? null : el('div', { class: 'field' }, [
-        el('label', { text: d.pay === 'debt' ? 'Оплачено сейчас наличными (если часть — остальное в долг)' : 'Наличными (остальное — безнал)' }),
-        el('input', { class: 'input num', inputmode: 'numeric', value: d.cashPart, oninput: function (e) { d.cashPart = e.target.value; saveDraft(); updateTotals(); } })
-      ]);
+      var cashInput = d.pay !== 'mixed' && d.pay !== 'debt' ? null
+        : amountField(d.pay === 'debt' ? 'Оплачено сейчас наличными (если часть — остальное в долг)' : 'Наличными (остальное — безнал)', d.cashPart, {
+          quick: [1000, 5000, 10000], onDone: function (v) { d.cashPart = v; saveDraft(); renderBottom(); } });
+      // Сдача: сколько дал покупатель — сколько вернуть (только подсказка, в учёт не пишется).
+      var change = d.pay !== 'cash' || !sm.total ? null : amountField('Покупатель дал (для расчёта сдачи)', d.given, {
+        quick: [5000, 10000, 20000], placeholder: 'необязательно',
+        hint: function (v) { return v ? (v >= sm.total ? 'Сдача: ' + money(v - sm.total) : 'Не хватает ' + money(sm.total - v)) : ''; },
+        onDone: function (v) { d.given = v; saveDraft(); renderBottom(); } });
+      var changeLine = d.pay === 'cash' && d.given && sm.total && Number(d.given) >= sm.total
+        ? el('div', { class: 'change num' }, ['Сдача: ', el('b', { text: money(Number(d.given) - sm.total) })]) : null;
       var debtPicker = d.pay !== 'debt' ? null : customerPicker(d.cust || (d.cust = {}), function () { saveDraft(); updateTotals(); }, true);
       var totals = el('div', { id: 'totals' });
       bottom.replaceChildren(
         el('div', { class: 'sum' }, [el('span', { class: 'muted', text: 'По каталогу' }), el('span', { class: 'num', text: money(sm.sum) })]),
-        el('div', { class: 'field' }, [el('label', { text: 'Цена (можно поставить свою)' }), priceInput]),
-        discChips, discInput, payChips, debtPicker, cashInput, totals
+        priceField,
+        discChips, discInput, payChips, debtPicker, cashInput, change, changeLine, totals
       );
       updateTotals();
     }
@@ -454,7 +547,58 @@
     }
     renderBottom();
 
-    var nodes = [typeChips, catChips, search, tiles, bottom];
+    var tpls = state.data.templates || [];
+    var tplRow = el('div', { class: 'tpls' }, tpls.map(function (t) {
+      var count = t.items.reduce(function (a, x) { return a + x.qty; }, 0);
+      return el('button', { class: 'tpl', onclick: function () { applyTemplate(t); } }, [
+        el('img', { src: 'img/ranunculus.svg', width: '40', height: '40', alt: '' }),
+        el('div', { class: 'tpl__name', text: t.name }),
+        el('div', { class: 'muted num', style: 'font-size:12px', text: count + ' шт · ' + money(t.price) })
+      ]);
+    }).concat(Object.keys(d.cart).length ? [el('button', { class: 'tpl tpl--add', onclick: saveTemplate }, [icon('plus'), el('div', { class: 'tpl__name', text: 'Сохранить как шаблон' })])] : []));
+    function applyTemplate(t) {
+      haptic('light');
+      var short = {};
+      d.cart = {};
+      t.items.forEach(function (x) {
+        var c = state.data.catalog.filter(function (k) { return k.item_id === x.item_id; })[0];
+        var have = c ? c.stock : 0;
+        if (have < x.qty) short[x.item_id] = { need: x.qty, have: have };
+        if (have > 0) d.cart[x.item_id] = Math.min(x.qty, have);
+      });
+      d.type = 'bouquet';
+      d.price = String(t.price);
+      state.shortage = Object.keys(short).length ? short : null;
+      saveDraft();
+      if (state.shortage) toast('Для «' + t.name + '» не хватает товара — отмечено на плитках', true);
+      renderSale();
+    }
+    // Сохранение шаблона: поле названия прямо на экране (системное окно ввода в Telegram работает не везде).
+    var naming = null;
+    function saveTemplate() {
+      if (naming) return;
+      var nameInput = el('input', { class: 'search', placeholder: 'Название букета, например «Нежность»', maxlength: '40' });
+      naming = el('div', { class: 'card' }, [
+        el('div', { class: 'muted', text: 'Сохранить состав и цену как шаблон — потом букет собирается одним нажатием.' }),
+        nameInput,
+        el('div', { class: 'row' }, [
+          el('button', { class: 'btn btn--primary', onclick: function () {
+            var name = nameInput.value.trim();
+            if (!name) { toast('Введите название', true); return; }
+            var sm = summary(d);
+            busy(postOp('template_save', { name: name, items: sm.items, price: sm.price || sm.sum }, uuid())).then(function (res) {
+              if (!res) return;
+              state.data = res.state;
+              toast('Шаблон «' + name + '» сохранён');
+            });
+          } }, ['Сохранить']),
+          el('button', { class: 'btn', onclick: function () { naming.remove(); naming = null; } }, ['Отмена'])
+        ])
+      ]);
+      tplRow.after(naming);
+      nameInput.focus();
+    }
+    var nodes = [typeChips, tpls.length || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
     if (!tg) nodes.push(el('button', { class: 'btn btn--primary fallback-main', id: 'fallback', onclick: submit }, ['Провести']));
     app.replaceChildren.apply(app, nodes);
     updateTotals();
@@ -1307,13 +1451,21 @@
         state.draft = newDraft();
         store(DRAFT_KEY, null);
         haptic('success');
-        toast((res.status === 'already' ? 'Уже было проведено: ' : 'Проведено: ') + money(res.result.total));
+        var how = { cash: 'наличными', card: 'безналом', mixed: 'нал + безнал', debt: 'в долг' }[d.pay] || '';
+        var change = d.pay === 'cash' && d.given && Number(d.given) > res.result.total ? ' · сдача ' + money(Number(d.given) - res.result.total) : '';
+        showDone(res.result.total, (d.type === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + how + change, res.status === 'already');
+        state.shortage = null;
         state.screen = 'main';
       })
       .catch(function (e) {
         haptic('error');
         if (!e.code) toast('Нет связи. Продажа сохранена на телефоне — нажмите «Провести» ещё раз.', true);
-        else toast(e.message, true);
+        else if (e.code === 'NOT_ENOUGH_STOCK' && e.details) {
+          // Кто-то успел продать раньше: показываем нехватку прямо на плитках.
+          state.shortage = {};
+          e.details.forEach(function (x) { state.shortage[x.item_id] = { need: x.need, have: x.have }; });
+          toast('Не хватает товара — отмечено на плитках', true);
+        } else toast(e.message, true);
         if (e.code === 'OP_FAILED') { d.op_id = uuid(); saveDraft(); }
       })
       .then(function () {

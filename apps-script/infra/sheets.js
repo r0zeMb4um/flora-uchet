@@ -19,7 +19,19 @@ var SheetsStore = (function () {
 
     function sheetOf(name) {
       var sh = ss.getSheetByName(name);
-      if (!sh) throw new Error('Нет листа ' + name + ' — запустите setup()');
+      if (sh) return sh;
+      // Новый лист из схемы (появился в новой версии) создаётся сам: заголовки, текстовые форматы, защита.
+      var cols = Schema.SHEETS[name];
+      if (!cols) throw new Error('Нет листа ' + name + ' — запустите setup()');
+      sh = ss.insertSheet(name);
+      sh.getRange(1, 1, 1, cols.length).setValues([cols.map(function (c) { return c.name; })]).setFontWeight('bold');
+      sh.setFrozenRows(1);
+      cols.forEach(function (c, i) {
+        var range = sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1);
+        if (c.type === 's') range.setNumberFormat('@');
+        if (c.type === 'n') range.setNumberFormat('0');
+      });
+      try { var pr = sh.protect().setDescription('Пишет только бот'); pr.removeEditors(pr.getEditors()); } catch (e) { /* защита не обязательна для работы */ }
       return sh;
     }
 

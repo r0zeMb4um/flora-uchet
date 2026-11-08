@@ -231,3 +231,17 @@ test('флорист не может открыть разделы владел�
   assert.throws(() => MiniApi.dispatch(store, 1, { action: 'post', kind: 'sale', op_id: 'y'.repeat(10), payload: {} }, now), { code: 'FORBIDDEN' });
   assert.throws(() => MiniApi.dispatch(store, 1, { action: 'owner_period', from: 'вчера', to: 'сегодня' }, now), { code: 'BAD_INPUT' });
 });
+
+test('шаблоны букетов и хиты: сохранить, увидеть в кассе, дубль названия — отказ, убрать', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const post = (who, kind, payload) => MiniApi.dispatch(store, who, { action: 'post', kind, op_id: 'op-tpl-' + String(++n).padStart(5, '0'), payload }, now);
+  post(777, 'sale', { items: [{ item_id: 'rose', qty: 7 }], price: 8400, payments: [{ method: 'cash', amount: 8400 }] });
+  const saved = post(777, 'template_save', { name: 'Нежность', items: [{ item_id: 'rose', qty: 7 }], price: 9000 });
+  assert.throws(() => post(777, 'template_save', { name: 'нежность', items: [{ item_id: 'rose', qty: 1 }], price: 100 }), { code: 'DUPLICATE' });
+  const st = MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data;
+  assert.deepEqual(st.templates.map((t) => [t.name, t.price, t.items, t.mine]), [['Нежность', 9000, [{ item_id: 'rose', qty: 7 }], true]]);
+  assert.deepEqual(st.hits, ['rose']);
+  post(777, 'template_hide', { template_id: saved.data.result.template_id });
+  assert.deepEqual(MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.templates, []);
+});
