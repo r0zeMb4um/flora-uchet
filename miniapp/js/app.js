@@ -5,6 +5,14 @@
 (function () {
   'use strict';
 
+  // replaceChildren превращает null/undefined/false в текст «null». Пропускаем пустые места — тогда в списках можно писать «условие ? элемент : null».
+  (function () {
+    var orig = Element.prototype.replaceChildren;
+    Element.prototype.replaceChildren = function () {
+      return orig.apply(this, Array.prototype.slice.call(arguments).filter(function (x) { return x !== null && x !== undefined && x !== false; }));
+    };
+  })();
+
   var tg = window.Telegram && window.Telegram.WebApp;
   var app = document.getElementById('app');
   var DRAFT_KEY = 'flora.sale.draft.v1';
@@ -623,6 +631,9 @@
       void app.offsetWidth;
       app.classList.add('enter');
       countUpAll(app);
+      // Появление — только при входе на экран: потом класс снимается, чтобы перерисовки не мигали.
+      clearTimeout(render._t);
+      render._t = setTimeout(function () { app.classList.remove('enter'); }, 900);
     }
   }
 
@@ -789,6 +800,7 @@
     }
     function updateTotals() {
       var sm = summary(d);
+      drawSumbar(sm);
       var t = document.getElementById('totals');
       var nodes = [];
       if (sm.total) nodes.push(el('div', { class: 'sum' }, [el('span', { text: 'Итого' }), el('span', { class: 'big num', text: money(sm.total) })]));
@@ -805,6 +817,29 @@
         var fb = document.getElementById('fallback');
         if (fb) { fb.textContent = label; fb.disabled = !sm.payload || state.sending; }
       }
+    }
+    var sumbar = el('div', { class: 'sumbar', role: 'region', 'aria-label': 'Итог продажи' });
+    function drawSumbar(sm) {
+      var n = sm.items.reduce(function (a, x) { return a + x.qty; }, 0);
+      if (!n) { sumbar.hidden = true; return; }
+      sumbar.hidden = false;
+      var pays = [['cash', 'Нал'], ['card', 'Безнал'], ['mixed', 'Нал+б/н'], ['debt', 'Долг']];
+      sumbar.replaceChildren(
+        el('div', { class: 'sumbar__top' }, [
+          el('button', { class: 'sumbar__info', onclick: function () { bottom.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, [
+            el('span', { class: 'muted', text: n + ' шт · ' + (d.type === 'bouquet' ? 'букет' : 'продажа') }),
+            el('span', { class: 'sumbar__total num', text: money(sm.total || sm.price || sm.sum) }),
+            el('span', { class: 'sumbar__more' }, [icon('chevron-up'), 'цена и скидка'])
+          ])
+        ]),
+        el('div', { class: 'tabs4' }, pays.map(function (t) {
+          return el('button', { class: 'chip', 'aria-pressed': String(d.pay === t[0]), onclick: function () {
+            d.pay = t[0]; d.cashPart = ''; saveDraft(); renderBottom();
+            if (t[0] === 'mixed' || t[0] === 'debt') bottom.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } }, [t[1]]);
+        })),
+        sm.error && sm.items.length ? el('div', { class: 'error', text: sm.error }) : null
+      );
     }
     renderBottom();
 
@@ -860,6 +895,7 @@
       nameInput.focus();
     }
     var nodes = [typeChips, tpls.length || Object.keys(d.cart).length ? tplRow : null, catChips, search, tiles, bottom];
+    nodes.push(sumbar);
     if (!tg) nodes.push(el('button', { class: 'btn btn--primary fallback-main', id: 'fallback', onclick: submit }, ['Провести']));
     app.replaceChildren.apply(app, nodes);
     updateTotals();

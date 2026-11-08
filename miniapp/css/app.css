@@ -364,3 +364,20 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
 .cal__day--on .cal__dots i { background: #fff; }
 .cal__dots em { font-size: 9px; font-style: normal; font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .draw, .ring { animation: none; stroke-dashoffset: 0; } }
+
+/* Режим «одна рука»: итог и оплата прилипают к низу экрана продажи (над кнопкой «Провести» Telegram). */
+.sumbar {
+  position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 3; margin-top: 4px;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 20px;
+  background: rgba(22, 57, 64, .9); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-line); box-shadow: 0 -6px 24px rgba(0, 0, 0, .25);
+}
+.sumbar__info { display: flex; align-items: baseline; gap: 10px; width: 100%; border: 0; background: none; color: #fff; font: inherit; padding: 0; cursor: pointer; text-align: left; }
+.sumbar__total { font-size: 24px; font-weight: 700; margin-left: auto; }
+.sumbar__more { font-size: 12px; color: var(--rose-soft); display: flex; align-items: center; gap: 2px; }
+.sumbar .chip { min-height: 44px; }
+/* Чтобы низ экрана продажи не прятался под панелью. */
+.screen { scroll-padding-bottom: 160px; }
+
+/* Атрибут hidden должен скрывать всегда — иначе display:flex у меню и панели итога его перебивает. */
+[hidden] { display: none !important; }
