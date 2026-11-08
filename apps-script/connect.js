@@ -21,6 +21,12 @@ function connectBot() {
   Tg.call('setMyCommands', { commands: [{ command: 'start', description: 'Меню' }] });
   // Кнопка «Касса» слева от поля ввода — открывает Mini App.
   Tg.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Касса', web_app: { url: MINIAPP_URL } } });
+  // Описание бота (видно до нажатия «Запустить») и короткое описание (в профиле и при пересылке).
+  Tg.call('setMyDescription', { description:
+    'Флора·Учёт — цветочная касса в Telegram.\n\n' +
+    'Продажи и букеты, предзаказы, приход и брак, касса смены с пересчётом, зарплата флористов — ' +
+    'и отчёт владелице сразу после закрытия, сверенный до тенге.\n\nВход — по ссылке-приглашению от владелицы магазина.' });
+  Tg.call('setMyShortDescription', { short_description: 'Цветочная касса: продажи, склад, касса смены и отчёты владелице.' });
   var me = Tg.call('getMe');
   props.setProperty('BOT_USERNAME', me.username);
 

@@ -37,6 +37,85 @@
     var h = new Date(Date.now() + 5 * 3600000).getUTCHours(); // время Алматы
     return h >= 5 && h < 12 ? 'Доброе утро' : h < 18 && h >= 12 ? 'Добрый день' : 'Добрый вечер';
   }
+  /** Линейный рисунок-букет для пустых экранов (без внешних файлов). */
+  var BOUQUET_SVG = '<svg viewBox="0 0 120 120" width="112" height="112" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M44 108 L60 70 L76 108 Z" fill="rgba(252,214,226,.18)"/>' +
+    '<path d="M60 70 L50 46 M60 70 L60 40 M60 70 L72 48"/>' +
+    '<circle cx="48" cy="38" r="9" fill="rgba(224,80,126,.55)"/><circle cx="60" cy="30" r="10" fill="rgba(240,124,160,.6)"/><circle cx="74" cy="40" r="9" fill="rgba(224,80,126,.55)"/>' +
+    '<path d="M44 38 q4 -6 8 0 M56 30 q4 -7 8 0 M70 40 q4 -6 8 0"/>' +
+    '<path d="M50 56 q-12 -2 -16 -12 q12 0 16 12 M70 58 q12 -2 16 -12 q-12 0 -16 12" fill="rgba(159,232,192,.25)"/>' +
+    '<path d="M52 96 h16"/></svg>';
+
+  /** Пустое состояние: рисунок, заголовок, пояснение, необязательная кнопка. */
+  function emptyState(titleText, text, action) {
+    var pic = el('div', { class: 'empty__pic' });
+    pic.innerHTML = BOUQUET_SVG;
+    return el('div', { class: 'card empty' }, [
+      pic,
+      el('div', { class: 'empty__title script', text: titleText }),
+      text ? el('div', { class: 'muted', text: text }) : null,
+      action ? el('button', { class: 'btn btn--primary', onclick: action.onclick }, [action.label]) : null
+    ]);
+  }
+
+  /** Скелетон: серые «пустые карточки», пока данные загружаются. */
+  function skeleton(kind) {
+    var line = function (w) { return el('div', { class: 'sk sk--line', style: 'width:' + w }); };
+    var card = function () { return el('div', { class: 'card sk-card' }, [line('40%'), el('div', { class: 'sk sk--big' }), line('60%')]); };
+    var nodes = [el('div', { class: 'sk sk--title' })];
+    if (kind === 'list') {
+      for (var i = 0; i < 5; i++) nodes.push(el('div', { class: 'card sk-card sk-row' }, [el('div', { class: 'sk sk--ico' }), el('div', { style: 'flex:1' }, [line('70%'), line('45%')])]));
+    } else {
+      nodes.push(el('div', { class: 'grid2' }, [card(), card(), card(), card()]));
+      nodes.push(el('div', { class: 'sk sk--btn' }));
+    }
+    return el('div', { class: 'sk-wrap', 'aria-busy': 'true', 'aria-label': 'Загрузка' }, nodes);
+  }
+
+  /** Цифры «набегают» от нуля при входе на экран. */
+  function countUpAll(root) {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    root.querySelectorAll('[data-count]').forEach(function (node) {
+      var target = Number(node.getAttribute('data-count'));
+      var isMoney = node.getAttribute('data-money') === '1';
+      if (!isFinite(target) || target === 0) return;
+      var t0 = null;
+      var dur = 700;
+      function step(t) {
+        if (t0 === null) t0 = t;
+        var k = Math.min(1, (t - t0) / dur);
+        var v = Math.round(target * (1 - Math.pow(1 - k, 3)));
+        node.textContent = isMoney ? money(v) : String(v);
+        if (k < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
+  function numEl(value, isMoney, cls) {
+    return el('div', { class: 'big num' + (cls ? ' ' + cls : ''), 'data-count': String(value), 'data-money': isMoney ? '1' : '0',
+      text: isMoney ? money(value) : String(value) });
+  }
+
+  /** Праздничные лепестки — когда касса сошлась до тенге. */
+  function petalBurst() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var box = el('div', { class: 'burst', 'aria-hidden': 'true' });
+    for (var i = 0; i < 26; i++) {
+      var p = el('span', { class: 'burst__p' });
+      var a = Math.random() * Math.PI * 2;
+      var d = 120 + Math.random() * 160;
+      p.style.setProperty('--x', Math.round(Math.cos(a) * d) + 'px');
+      p.style.setProperty('--y', Math.round(Math.sin(a) * d - 80) + 'px');
+      p.style.setProperty('--r', Math.round(Math.random() * 540 - 270) + 'deg');
+      p.style.animationDelay = Math.round(Math.random() * 120) + 'ms';
+      if (i % 3 === 0) p.style.background = '#fcd6e2';
+      if (i % 5 === 0) p.style.background = '#9fe8c0';
+      box.appendChild(p);
+    }
+    document.body.appendChild(box);
+    setTimeout(function () { box.remove(); }, 1800);
+  }
+
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -224,6 +303,7 @@
       app.classList.remove('enter');
       void app.offsetWidth;
       app.classList.add('enter');
+      countUpAll(app);
     }
   }
 
@@ -238,7 +318,8 @@
       el('div', { class: 'muted', text: s ? 'Смена №' + s.shift_no + ' · с ' + String(s.opened_at).slice(11, 16) + (s.florists.length > 1 ? ' · ' + s.florists.map(firstName).join(' и ') : '') : 'Пусть день будет полон красоты' })
     ])];
     if (!s) {
-      nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Смена не открыта. Откройте её в чате бота кнопкой «Открыть смену».' })]));
+      nodes.push(emptyState('Смена ещё не открыта', 'Откройте её в чате бота кнопкой «Открыть смену» — касса сразу оживёт.',
+        tg ? { label: 'Перейти в чат', onclick: function () { tg.close(); } } : null));
     } else if (!s.on_shift) {
       nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
     } else {
@@ -249,9 +330,9 @@
       var low = d.catalog.filter(function (c) { return c.stock < c.min; });
       nodes.push(el('div', { class: 'grid2' }, [
         el('div', { class: 'card card--accent' }, [icon('chart-line'), el('div', { class: 'muted', text: 'Выручка смены' }),
-          el('div', { class: 'big num', text: money(s.revenue) }), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count })]),
+          numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count })]),
         s.my_pay ? el('div', { class: 'card' }, [icon('wallet'), el('div', { class: 'muted', text: 'Мой заработок' }),
-          el('div', { class: 'big num', text: money(s.my_pay.total) }),
+          numEl(s.my_pay.total, true),
           el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) })]) : null,
         el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer', onclick: function () { openScreen('preorders'); } }, [
           icon('calendar-heart'), el('div', { class: 'muted', text: 'Предзаказы' }), el('div', { class: 'big num', text: String(orders.length) }),
@@ -310,7 +391,7 @@
         return (state.cat === 'all' || c.category === state.cat) && (!qq || c.name.toLowerCase().indexOf(qq) >= 0);
       });
       tiles.replaceChildren.apply(tiles, l.map(tile));
-      if (!l.length) tiles.replaceChildren(el('div', { class: 'muted', text: 'Ничего не найдено' }));
+      if (!l.length) tiles.replaceChildren(el('div', { class: 'muted', style: 'grid-column:1/-1;text-align:center;padding:18px 0', text: 'Ничего не нашлось — проверьте название или выберите «Все»' }));
     }
     function tile(c) {
       var qty = d.cart[c.item_id] || 0;
@@ -549,7 +630,8 @@
       busy(postOp('close_shift', { counted: counted, close_withdrawal: w || 0, expenses_confirmed: true }, c.op_id)).then(function (res) {
         if (!res) return;
         haptic('success');
-        c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no };
+        c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no, clean: res.result.cash_diff === 0 };
+        if (res.result.cash_diff === 0) setTimeout(petalBurst, 250);
         state.data = res.state;
         goStep('done');
       });
@@ -575,6 +657,7 @@
     app.replaceChildren(
       el('div', { class: 'card card--accent' }, [
         el('div', { class: 'big', text: 'Смена №' + c.done.shift_no + ' закрыта' }),
+        c.done.clean ? el('div', { class: 'script', style: 'font-size:22px', text: 'Касса сошлась до тенге!' }) : null,
         el('div', { class: 'muted num', text: 'Оставлено в кассе на следующую смену: ' + money(c.done.next_cash) })
       ]),
       el('div', { class: 'muted center', text: 'Отчёт отправлен владелице.' }));
@@ -773,7 +856,7 @@
     backButton(true);
     var f = state.form;
     if (!f.receipts) {
-      app.replaceChildren(title('Возврат', 'Загружаем чеки за 7 дней…'));
+      app.replaceChildren(title('Возврат', 'Чеки за 7 дней'), skeleton('list'));
       mainButton(null);
       api({ action: 'receipts', days: 7 }).then(function (list) { f.receipts = list; render(); })
         .catch(function (e) { toast(e.message || 'Нет связи', true); });
@@ -791,7 +874,7 @@
             el('span', { class: 'num', text: money(r.total) })]),
           el('div', { class: 'muted num', text: (r.type === 'bouquet' ? 'букет · ' : r.type === 'preorder' ? 'предзаказ · ' : '') + 'можно вернуть деньгами до ' + money(r.refundable) })
         ]);
-      }) : [el('div', { class: 'muted', text: 'Чеков не найдено' })]));
+      }) : [emptyState('Чеков не нашлось', q ? 'Нет чеков на такую сумму за 7 дней.' : 'За последние 7 дней чеков нет.')]));
       return;
     }
     var r = f.receipt;
@@ -857,7 +940,9 @@
     mainButton('Новый предзаказ', !state.sending, function () { openScreen('preorder_new'); });
     var d = state.data;
     var nodes = [title('Предзаказы', 'По дате выдачи')];
-    if (!d.preorders.length && !d.reservations.length) nodes.push(el('div', { class: 'muted', text: 'Активных предзаказов и броней нет.' }));
+    if (!d.preorders.length && !d.reservations.length) {
+      nodes.push(emptyState('Предзаказов пока нет', 'Когда клиент закажет букет заранее, он появится здесь — по дате выдачи.'));
+    }
     d.preorders.forEach(function (p) {
       nodes.push(el('div', { class: 'card' }, [
         el('div', { class: 'sum' }, [el('b', { text: dateRu(p.pickup_date) + ' · ' + p.customer }), el('span', { class: 'num', text: money(p.total) })]),
@@ -997,8 +1082,8 @@
     var f = state.form;
     if (f.data === undefined) {
       f.data = null;
-      app.replaceChildren(ownerTabs(), el('div', { class: 'muted pad center', text: 'Загрузка…' }));
-      api(Object.assign({ action: action }, params || {})).then(function (d) { f.data = d; render(); })
+      app.replaceChildren(ownerTabs(), skeleton(action === 'owner_today' || action === 'owner_period' ? 'cards' : 'list'));
+      api(Object.assign({ action: action }, params || {})).then(function (d) { f.data = d; render(); countUpAll(app); })
         .catch(function (e) { f.data = undefined; app.replaceChildren(ownerTabs(), el('div', { class: 'error pad', text: e.message || 'Нет связи' })); });
       return;
     }
@@ -1015,13 +1100,13 @@
       var r = d.shift;
       var nodes = [ownerTabs()];
       if (d.alerts.length) nodes.push(el('div', { class: 'card card--note' }, d.alerts.map(function (a) { return el('div', { text: '⚠️ ' + a }); })));
-      if (!r) nodes.push(el('div', { class: 'card' }, [el('div', { text: 'Открытой смены сейчас нет.' })]));
+      if (!r) nodes.push(emptyState('Смена не открыта', 'Как только флорист откроет смену, здесь будут выручка и касса в реальном времени.'));
       else {
         nodes.push(el('div', { class: 'row' }, [el('h1', { class: 'h1', text: 'Смена №' + r.shift_no }), el('div', { class: 'muted', text: r.florists.join(', ') })]));
         nodes.push(el('div', { class: 'grid2' }, [
-          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), el('div', { class: 'big num', text: money(r.revenue) }),
+          el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Выручка' }), numEl(r.revenue, true),
             el('div', { class: 'muted', text: 'чеков: ' + r.receipts_count })]),
-          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'В кассе по расчёту' }), el('div', { class: 'big num', text: money(r.calc_cash) }),
+          el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'В кассе по расчёту' }), numEl(r.calc_cash, true),
             el('div', { class: 'muted num', text: 'безнал ' + money(r.card_total) })])
         ]));
         nodes.push(el('div', { class: 'card' }, [
@@ -1050,7 +1135,7 @@
     mainButton(null);
     ownerLoad('owner_shifts', { limit: 60 }, function (list) {
       var nodes = [ownerTabs()];
-      if (!list.length) nodes.push(el('div', { class: 'muted', text: 'Смен пока нет.' }));
+      if (!list.length) nodes.push(emptyState('Смен пока нет', 'После первой закрытой смены здесь появятся отчёты и чеки.'));
       list.forEach(function (s) {
         var diff = s.cash_diff === null ? 'открыта' : s.cash_diff === 0 ? 'касса сошлась' : (s.cash_diff > 0 ? 'излишек ' : 'недостача ') + money(Math.abs(s.cash_diff));
         nodes.push(el('button', { class: 'btn', style: 'text-align:left', onclick: function () { openScreen('owner_shift', { shift_id: s.shift_id }); } }, [
@@ -1190,6 +1275,7 @@
     ownerLoad('owner_customers', {}, function (list) {
       var total = list.reduce(function (a, c) { return a + c.debt; }, 0);
       var nodes = [ownerTabs(), el('div', { class: 'card' }, [kv('Итого долгов', money(total))])];
+      if (!list.length) nodes.push(emptyState('Должников нет', 'Все рассчитались — так держать.'));
       list.forEach(function (c) {
         var card = el('div', { class: 'card' }, [
           el('div', { class: 'sum' }, [el('b', { text: c.name }), el('span', { class: 'num ' + (c.debt ? 'copper' : ''), text: c.debt ? money(c.debt) : 'без долга' })]),
