@@ -2790,37 +2790,48 @@
 
   SCREENS.owner_expenses = function () {
     backButton(true);
-    mainButton(null);
     var f = state.form;
     ownerLoad('owner_expenses', { month: f.month || '' }, function (d) {
       if (!f.month) f.month = d.month;
-      if (f.item === undefined) { f.item = d.presets[0] || ''; f.amount = ''; f.comment = ''; }
-      var amount = signedInt(f.amount);
-      var go = function (delta) { return function () { f.month = shiftMonth(f.month, delta); f.data = undefined; render(); }; };
-      var form = el('div', { class: 'card' }, [
-        el('div', { class: 'muted', text: 'Добавить расход за ' + MONTHS[Number(f.month.slice(5, 7)) - 1] }),
-        chips(d.presets.map(function (p) { return [p, p]; }).concat([['__other', 'Другое']]), d.presets.indexOf(f.item) >= 0 ? f.item : '__other', function (k) {
-          f.item = k === '__other' ? '' : k; f.other = k === '__other'; render();
-        }),
-        (f.other || !d.presets.length) ? el('input', { class: 'input', placeholder: 'Название статьи', value: f.item, maxlength: '60', oninput: function (e) { f.item = e.target.value; } }) : null,
-        el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Сумма, ₸ (минус — исправление)', value: f.amount, oninput: function (e) { f.amount = e.target.value; var b = document.getElementById('exp-add'); if (b) b.disabled = !(signedInt(f.amount) && f.item.trim()); } }),
-        el('input', { class: 'input', placeholder: 'Комментарий (по желанию)', value: f.comment, maxlength: '200', oninput: function (e) { f.comment = e.target.value; } }),
-        el('button', { id: 'exp-add', class: 'btn btn--primary', disabled: !(amount && f.item.trim()) || state.sending, onclick: function () {
-          var a = signedInt(f.amount);
-          if (!a || !f.item.trim()) return;
-          var opId = uuid();
-          busy(postOp('owner_expense', { month: f.month, item: f.item.trim(), amount: a, comment: f.comment.trim() }, opId)).then(function (res) {
+      if (!f.vals) { f.vals = {}; f.other = ''; f.otherAmount = ''; f.comment = ''; }
+      var go = function (delta) { return function () { f.month = shiftMonth(f.month, delta); f.vals = null; f.data = undefined; render(); }; };
+      // Сколько уже записано по каждой статье за месяц.
+      var saved = {};
+      d.items.forEach(function (e) { saved[e.item] = (saved[e.item] || 0) + e.amount; });
+      var names = d.presets.slice();
+      Object.keys(saved).forEach(function (k) { if (names.indexOf(k) < 0) names.push(k); }); // статьи, внесённые раньше, но убранные из настроек
+      var lines = function () {
+        var out = [];
+        names.forEach(function (n) { var v = signedInt(f.vals[n]); if (v) out.push({ item: n, amount: v }); });
+        var o = signedInt(f.otherAmount);
+        if (o && f.other.trim()) out.push({ item: f.other.trim(), amount: o });
+        return out;
+      };
+      var bad = function () {
+        var anyText = names.some(function (n) { return String(f.vals[n] || '').trim() && !signedInt(f.vals[n]); }) ||
+          (String(f.otherAmount || '').trim() && (!signedInt(f.otherAmount) || !f.other.trim()));
+        return !!anyText;
+      };
+      var upd = function () {
+        var n = lines().length;
+        mainButton(state.sending ? 'Записываем…' : 'Записать' + (n ? ' (' + n + ')' : ''), n > 0 && !bad() && !state.sending, function () {
+          var payload = { month: f.month, lines: lines(), comment: f.comment.trim() };
+          busy(postOp('owner_expense', payload, f.op_id)).then(function (res) {
             if (!res) return;
-            haptic('success'); toast('Расход добавлен');
-            var keep = f.month; openScreen('owner_expenses', { month: keep });
+            haptic('success'); toast('Записано статей: ' + payload.lines.length);
+            openScreen('owner_expenses', { month: f.month });
           });
-        } }, [icon('plus'), 'Добавить'])
-      ]);
-      var rows = d.items.map(function (e) {
-        return el('div', { class: 'card' }, [
-          el('div', { class: 'sum' }, [el('span', { text: e.item }), el('b', { class: 'num', text: money(e.amount) })]),
-          e.comment ? el('div', { class: 'muted', text: e.comment }) : null
+        });
+      };
+      var rows = names.map(function (n) {
+        return el('div', { class: 'sum' }, [
+          el('div', {}, [el('div', { text: n }), el('div', { class: 'muted num', text: saved[n] ? 'уже записано ' + money(saved[n]) : 'за месяц пока ничего' })]),
+          el('input', { class: 'input num', style: 'max-width:130px', inputmode: 'text', placeholder: 'сумма', value: f.vals[n] || '', 'aria-label': 'Сумма: ' + n,
+            oninput: function (e) { f.vals[n] = e.target.value; upd(); } })
         ]);
+      });
+      var shown = d.items.map(function (e) {
+        return el('div', { class: 'sum' }, [el('span', { class: 'muted', text: e.item + (e.comment ? ' · ' + e.comment : '') }), el('span', { class: 'num', text: money(e.amount) })]);
       });
       app.replaceChildren.apply(app, [
         el('h1', { class: 'h1', text: 'Расходы месяца' }),
@@ -2830,9 +2841,16 @@
           el('button', { class: 'chip', onclick: go(1), 'aria-label': 'Следующий месяц' }, [icon('chevron-right')])
         ]),
         el('div', { class: 'card card--accent' }, [el('div', { class: 'muted', text: 'Всего за месяц' }), el('div', { class: 'big num', text: money(d.total) })]),
-        form,
-        el('div', { class: 'muted center', text: 'Эти расходы идут в прибыль месяца. Записи не удаляются: ошибку исправляет запись с минусом — введите ту же сумму со знаком «−».' })
-      ].concat(rows.length ? rows : [emptyState('Расходов за месяц пока нет', 'Аренда, налоги, реклама — внесите, и прибыль в сводке станет точной.')]));
+        el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Впишите суммы по нужным статьям и нажмите «Записать». Пустые строки пропускаются. Ошибку исправляет сумма со знаком «−».' })].concat(rows)),
+        el('div', { class: 'card' }, [
+          el('div', { class: 'muted', text: 'Другая статья (по желанию)' }),
+          el('input', { class: 'input', placeholder: 'Название, например: Ремонт', value: f.other, maxlength: '60', oninput: function (e) { f.other = e.target.value; upd(); } }),
+          el('input', { class: 'input num', inputmode: 'text', placeholder: 'Сумма, ₸', value: f.otherAmount, 'aria-label': 'Сумма другой статьи', oninput: function (e) { f.otherAmount = e.target.value; upd(); } }),
+          el('input', { class: 'input', placeholder: 'Общий комментарий (по желанию)', value: f.comment, maxlength: '200', oninput: function (e) { f.comment = e.target.value; } })
+        ])
+      ].concat(shown.length ? [el('div', { class: 'card' }, [el('div', { class: 'script', style: 'font-size:22px', text: 'Записи месяца' })].concat(shown))]
+        : [emptyState('Расходов за месяц пока нет', 'Аренда, интернет, налоги — внесите, и прибыль в сводке станет точнее.')]));
+      upd();
     });
   };
 

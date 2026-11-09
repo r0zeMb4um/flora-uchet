@@ -284,3 +284,22 @@ test('закупочная цена: меняется в карточке поз
   post(1, 'catalog_edit', { item_id: 'rose', last_cost: 650 });
   assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').cost, 650);
 });
+
+// ---------- расходы месяца: несколько статей за раз ----------
+
+test('расходы месяца: аренда, интернет и налоги — одной операцией; ошибка пачки ничего не записывает', () => {
+  const { call, post } = shop();
+  const res = post(1, 'owner_expense', { month: '2026-11', comment: 'ноябрь', lines: [
+    { item: 'Аренда', amount: 150000 }, { item: 'Интернет', amount: 8000 }, { item: 'Налоги', amount: 21000 }] });
+  assert.deepEqual(res.data.result, { month: '2026-11', amount: 179000, lines: 3 });
+  const nov = call(1, { action: 'owner_expenses', month: '2026-11' });
+  assert.equal(nov.total, 179000);
+  assert.deepEqual(nov.items.map((e) => [e.item, e.amount, e.comment]), [['Аренда', 150000, 'ноябрь'], ['Интернет', 8000, 'ноябрь'], ['Налоги', 21000, 'ноябрь']]);
+  assert.throws(() => post(1, 'owner_expense', { month: '2026-11', lines: [{ item: 'Вода', amount: 500 }, { item: 'Свет', amount: 0 }] }), { code: 'BAD_INPUT' });
+  assert.equal(call(1, { action: 'owner_expenses', month: '2026-11' }).total, 179000, 'неудачная пачка не записала даже первую строку');
+  assert.throws(() => post(1, 'owner_expense', { month: '2026-11', lines: [] }), { code: 'BAD_INPUT' });
+  post(1, 'owner_expense', { month: '2026-11', lines: [{ item: 'Интернет', amount: -8000 }] }); // исправление минусом по одной статье
+  assert.equal(call(1, { action: 'owner_expenses', month: '2026-11' }).total, 171000);
+  post(1, 'owner_expense', { month: '2026-11', item: 'Вода', amount: 700 }); // старый формат (одна статья) работает по-прежнему
+  assert.equal(call(1, { action: 'owner_expenses', month: '2026-11' }).total, 171700);
+});

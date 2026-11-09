@@ -1114,16 +1114,27 @@ var Ops = (function () {
     plan.result = { template_id: t.template_id };
   };
 
+  /**
+   * Расходы владелицы за месяц. Либо одна статья (item + amount), либо пачка lines: [{ item, amount }] — аренда,
+   * интернет, налоги и т. д. за один раз. Сумма может быть со знаком «−» (исправление). Одна операция — всё или ничего.
+   */
   H.owner_expense = function (view, p, plan) {
     requireOwner(view);
     var month = p.month;
     if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw opsError('BAD_INPUT', 'Месяц в виде ГГГГ-ММ');
-    if (!Number.isSafeInteger(p.amount) || p.amount === 0 || Math.abs(p.amount) > MAX_NUM) throw opsError('BAD_INPUT', 'Сумма — целое число, не ноль и не больше 999 999 999');
-    add(plan, view, 'owner_expenses', {
-      expense_id: nextId(plan, 'ex'), month: month, item: text(p.item, 'статья', 60), amount: p.amount,
-      comment: optText(p.comment, 'комментарий', 200), created_by: view.ctx.staff_id
+    var lines = Array.isArray(p.lines) ? p.lines : [{ item: p.item, amount: p.amount }];
+    if (!lines.length || lines.length > 30) throw opsError('BAD_INPUT', 'Статей за раз — от 1 до 30');
+    var comment = optText(p.comment, 'комментарий', 200);
+    var total = 0;
+    lines.forEach(function (l) {
+      if (!Number.isSafeInteger(l.amount) || l.amount === 0 || Math.abs(l.amount) > MAX_NUM) throw opsError('BAD_INPUT', 'Сумма — целое число, не ноль и не больше 999 999 999');
+      add(plan, view, 'owner_expenses', {
+        expense_id: nextId(plan, 'ex'), month: month, item: text(l.item, 'статья', 60), amount: l.amount,
+        comment: comment, created_by: view.ctx.staff_id
+      });
+      total += l.amount;
     });
-    plan.result = { month: month, amount: p.amount };
+    plan.result = { month: month, amount: total, lines: lines.length };
   };
 
   // ---------- вход ----------
