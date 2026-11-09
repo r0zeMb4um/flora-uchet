@@ -23,7 +23,9 @@
   var LARGE_SUM = 50000; // с этой суммы «Провести» просит подтвердить
   var CAT_ICON = { flowers: 'flower', greens: 'leaf', toys: 'gift', baskets: 'basket', packaging: 'package' };
 
-  var state = { data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false,
+  /** Интерфейс владелицы (кабинет), а не режим смены: владелица, вышедшая в смену, видит экраны флориста. */
+  function ownerUI(d) { var x = d || state.data; return !!x && x.me.role === 'owner' && state.mode !== 'shift'; }
+  var state = { mode: 'owner', data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false,
     offline: typeof navigator !== 'undefined' && navigator.onLine === false, fromCache: false, fieldError: null };
   var SCREENS_EARLY = {};
 
@@ -707,7 +709,7 @@
     return api({ action: 'bootstrap' }).then(function (data) {
       setData(data, true);
       // Ссылка «Закрыть смену в кассе» из чата (передача смены) открывает сразу закрытие.
-      if (data.me.role === 'owner') { openScreen('owner_today'); return; }
+      if (ownerUI(data)) { openScreen('owner_today'); return; }
       if (location.hash === '#close' && data.shift && data.shift.on_shift) { history.replaceState(null, '', location.pathname); openClose(); return; }
       render();
       pump();
@@ -846,7 +848,7 @@
     logo.setAttribute('aria-label', 'На главную');
     function home() {
       if (!state.data) return;
-      if (state.data.me.role === 'owner') { if (state.screen !== 'owner_today') openScreen('owner_today'); return; }
+      if (ownerUI()) { if (state.screen !== 'owner_today') openScreen('owner_today'); return; }
       if (state.screen !== 'main') goMain();
     }
     logo.addEventListener('click', home);
@@ -854,13 +856,13 @@
   })();
   function goMain() {
     // Владелица возвращается в свои разделы, флорист — на главную кассы.
-    if (state.data && state.data.me.role === 'owner') {
+    if (ownerUI()) {
       openScreen(OWNER_BACK[state.screen] || (state.screen === 'owner_shift' ? 'owner_history' : state.screen === 'owner_manage' ? 'owner_today' : 'owner_today'));
       return;
     }
     state.screen = FLORIST_BACK[state.screen] || 'main'; render();
   }
-  var FLORIST_BACK = { income: 'more', defect: 'more', refund: 'more', cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more' };
+  var FLORIST_BACK = { schedule: 'more', income: 'more', defect: 'more', refund: 'more', cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more' };
 
   // ---------- нижнее меню ----------
 
@@ -872,21 +874,22 @@
     owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
     owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', owner_day: 'schedule', schedule: 'owner_manage', owner_work: 'owner_manage'
   };
   function renderNav() {
     var nav = document.getElementById('nav');
     if (!nav) return;
     var d = state.data;
     var cur = NAV_OF[state.screen];
-    var isOwner = d && d.me.role === 'owner';
+    var isOwner = ownerUI();
+    if (isOwner && cur === 'more') cur = 'owner_manage';
     var onShift = d && d.shift && d.shift.on_shift;
     if (!d || !cur || state.mb || (!isOwner && !onShift)) { nav.hidden = true; return; }
     var item = function (key, ic, label) {
@@ -929,6 +932,27 @@
     }
   }
 
+  /** Кнопка в шапке для владелицы: «Я в смене» ↔ «Кабинет». */
+  function renderModeSwitch() {
+    var top = document.querySelector('.top');
+    if (!top) return;
+    var btn = document.getElementById('modeSwitch');
+    var d = state.data;
+    if (!d || d.me.role !== 'owner') { if (btn) btn.remove(); return; }
+    if (!btn) {
+      btn = el('button', { id: 'modeSwitch', class: 'chip modeswitch', type: 'button' });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var w = state.data.owner_work;
+        if (state.mode === 'shift') { state.mode = 'owner'; openScreen('owner_today'); return; }
+        if (!w || !w.works) { openScreen('owner_work'); return; }
+        state.mode = 'shift'; state.screen = 'main'; render();
+      });
+      top.appendChild(btn);
+    }
+    btn.textContent = state.mode === 'shift' ? 'Кабинет' : 'Я в смене';
+  }
+
   function renderNow() {
     if (!state.data) return;
     if (state.screen === 'sale') renderSale();
@@ -937,6 +961,7 @@
     else renderMain();
     renderNav();
     updateNet();
+    renderModeSwitch();
     // Экран продажи — спокойный: без анимаций и чуть мельче шрифт.
     document.body.classList.toggle('on-sale', state.screen === 'sale');
     // Плавное появление — только при переходе на другой экран, не при каждом нажатии.
@@ -954,7 +979,7 @@
   }
 
   function renderMain() {
-    if (state.data.me.role === 'owner') { openScreen('owner_today'); return; }
+    if (ownerUI()) { openScreen('owner_today'); return; }
     backButton(false);
     mainButton(null);
     var d = state.data;
@@ -969,6 +994,11 @@
     } else if (!s.on_shift) {
       nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Вы не работаете в этой смене.' })]));
     } else {
+      if (d.next_shift) {
+        nodes.push(el('button', { class: 'card', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left;width:100%', onclick: function () { openScreen('schedule'); } }, [
+          el('div', { class: 'muted', text: 'Ваша ближайшая смена' }),
+          el('b', { text: dayLabel(d.next_shift.date) + (d.next_shift.with.length ? ' · вместе с ' + d.next_shift.with.join(' и ') : '') })]));
+      }
       var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
       var tomorrow = new Date(Date.now() + 29 * 3600000).toISOString().slice(0, 10);
       var orders = d.preorders.concat(d.reservations);
@@ -1014,7 +1044,8 @@
         el('button', { class: 'btn btn--tile', onclick: go('cancel') }, [icon('receipt-off'), 'Отмена продажи']),
         el('button', { class: 'btn btn--tile', onclick: go('cashout') }, [icon('cash-banknote'), 'Расход']),
         el('button', { class: 'btn btn--tile', onclick: go('repay') }, [icon('coin'), 'Погашение долга']),
-        el('button', { class: 'btn btn--tile btn--wide', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала из кассы'])
+        el('button', { class: 'btn btn--tile', onclick: go('schedule') }, [icon('calendar-event'), 'График смен']),
+        el('button', { class: 'btn btn--tile', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала'])
       ]),
       el('div', { class: 'more-end' }, [
         el('button', { class: 'btn btn--close', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену'])
@@ -2141,6 +2172,8 @@
         tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog'),
         tile('users', 'Сотрудники', 'флористы, ставки, приглашения', 'owner_team'),
         tile('receipt', 'Расходы месяца', 'аренда, налоги и др.', 'owner_expenses'),
+        tile('calendar-event', 'График смен', 'кто когда работает', 'schedule'),
+        tile('user-star', 'Я в смене', 'моя оплата и выход в смену', 'owner_work'),
         tile('calendar-heart', 'Предзаказы', 'список и отмена', 'owner_preorders'),
         tile('clipboard-list', 'Начальные остатки', 'при запуске, до первой смены', 'owner_start_stock'),
         tile('user-dollar', 'Долги с прошлого', 'тетрадь → касса', 'owner_start_debt'),
@@ -2343,6 +2376,143 @@
       formField('Комментарий (по желанию)', el('input', { class: 'input', value: f.comment, maxlength: '200', oninput: function (e) { f.comment = e.target.value; } }))
     );
     upd();
+  };
+
+  // ---------- график смен (D31) ----------
+
+  var WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  function dayLabel(iso) {
+    var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+    var tomorrow = new Date(Date.now() + 29 * 3600000).toISOString().slice(0, 10);
+    var d = new Date(iso + 'T00:00:00Z');
+    var base = WEEKDAYS[d.getUTCDay()] + ', ' + iso.slice(8, 10) + '.' + iso.slice(5, 7);
+    return iso === today ? 'сегодня (' + base + ')' : iso === tomorrow ? 'завтра (' + base + ')' : base;
+  }
+
+  SCREENS.schedule = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    if (f.month === undefined) f.month = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 7);
+    var go = function (delta) { return function () { f.month = shiftMonth(f.month, delta); f.data = undefined; render(); }; };
+    var today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+    var draw = function (d) {
+      var byDate = {};
+      d.entries.forEach(function (e) { (byDate[e.date] = byDate[e.date] || []).push(e); });
+      var y = Number(f.month.slice(0, 4)), m = Number(f.month.slice(5, 7));
+      var first = new Date(Date.UTC(y, m - 1, 1));
+      var lead = (first.getUTCDay() + 6) % 7; // понедельник — первый
+      var days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      var cells = [];
+      ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].forEach(function (w) { cells.push(el('div', { class: 'sch__wd', text: w })); });
+      for (var i = 0; i < lead; i++) cells.push(el('div', { class: 'sch__cell sch__cell--empty' }));
+      for (var day = 1; day <= days; day++) {
+        var iso = f.month + '-' + String(day).padStart(2, '0');
+        var list = byDate[iso] || [];
+        var cls = 'sch__cell' + (iso === today ? ' sch__cell--today' : '') + (list.some(function (e) { return e.me; }) ? ' sch__cell--me' : '');
+        var attrs = { class: cls, 'aria-label': iso };
+        if (d.can_edit) { attrs.onclick = (function (iso2) { return function () { openScreen('owner_day', { date: iso2, month: f.month }); }; })(iso); }
+        cells.push(el(d.can_edit ? 'button' : 'div', attrs, [el('b', { text: String(day) })].concat(list.slice(0, 2).map(function (e) { return el('span', { class: 'sch__who', text: firstName(e.name).slice(0, 6) }); }))));
+      }
+      var upcoming = d.entries.filter(function (e) { return e.date >= today; });
+      var seen = {};
+      var lines = upcoming.filter(function (e) { return e.me; }).slice(0, 4).map(function (e) {
+        var others = upcoming.filter(function (x) { return x.date === e.date && !x.me; }).map(function (x) { return x.name; });
+        return el('div', { class: 'sum' }, [el('span', { text: dayLabel(e.date) }), el('span', { class: 'muted', text: others.length ? 'с ' + others.join(' и ') : '' })]);
+      });
+      app.replaceChildren.apply(app, [
+        el('h1', { class: 'h1', text: 'График смен' }),
+        el('div', { class: 'row' }, [
+          el('button', { class: 'chip', onclick: go(-1), 'aria-label': 'Прошлый месяц' }, [icon('chevron-left')]),
+          el('b', { text: MONTHS[m - 1] + ' ' + y }),
+          el('button', { class: 'chip', onclick: go(1), 'aria-label': 'Следующий месяц' }, [icon('chevron-right')])
+        ]),
+        el('div', { class: 'sch' }, cells),
+        d.can_edit ? el('div', { class: 'muted center', text: 'Нажмите на день, чтобы выбрать, кто работает. График — просто памятка: он никого не ограничивает.' })
+          : el('div', { class: 'muted center', text: 'График ставит владелица. Он только напоминает и никого не ограничивает.' })
+      ].concat(lines.length ? [el('div', { class: 'card' }, [el('div', { class: 'script', style: 'font-size:22px', text: 'Ваши смены' })].concat(lines))] : []));
+    };
+    if (f.data === undefined) {
+      f.data = null;
+      app.replaceChildren(el('h1', { class: 'h1', text: 'График смен' }), skeleton('list'));
+      api({ action: 'schedule', month: f.month }).then(function (d) { f.data = d; render(); })
+        .catch(function (e) { f.data = undefined; app.replaceChildren(el('div', { class: 'error pad', text: e.message || 'Нет связи' })); });
+      return;
+    }
+    if (f.data) draw(f.data);
+  };
+
+  SCREENS.owner_day = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.sel === undefined) {
+      f.sel = null; f.note = '';
+      app.replaceChildren(title(dayLabel(f.date), 'Кто работает в этот день'), skeleton('list'));
+      mainButton(null);
+      api({ action: 'schedule', month: f.date.slice(0, 7) }).then(function (d) {
+        f.people = d.people;
+        f.sel = d.entries.filter(function (e) { return e.date === f.date; }).map(function (e) { return e.staff_id; });
+        var n = d.entries.filter(function (e) { return e.date === f.date && e.note; })[0];
+        f.note = n ? n.note : '';
+        render();
+      }).catch(function (e) { f.sel = undefined; toast(e.message || 'Нет связи', true); });
+      return;
+    }
+    function upd() {
+      mainButton(state.sending ? 'Сохраняем…' : 'Сохранить день', !state.sending, function () {
+        submitOp('schedule_set', { date: f.date, staff_ids: f.sel, note: f.note.trim() }, 'График сохранён', function () { openScreen('schedule', { month: f.month }); });
+      });
+    }
+    var toggle = function (id) {
+      var i = f.sel.indexOf(id);
+      if (i >= 0) f.sel.splice(i, 1);
+      else if (f.sel.length >= 2) { toast('В смене не больше двух человек', true); return; }
+      else f.sel.push(id);
+      render();
+    };
+    app.replaceChildren(
+      title(dayLabel(f.date), 'Кто работает в этот день'),
+      el('div', { class: 'card' }, [el('div', { class: 'chips' }, f.people.map(function (p) {
+        return el('button', { class: 'chip', 'aria-pressed': String(f.sel.indexOf(p.staff_id) >= 0), onclick: function () { toggle(p.staff_id); } }, [p.name + (p.role === 'owner' ? ' (вы)' : '')]);
+      }))]),
+      formField('Пометка (по желанию)', el('input', { class: 'input', value: f.note, maxlength: '100', placeholder: 'например: приём товара утром', oninput: function (e) { f.note = e.target.value; } })),
+      el('div', { class: 'muted center', text: 'Если никого не выбрать, день станет пустым.' })
+    );
+    upd();
+  };
+
+  // ---------- владелица выходит в смену (D32) ----------
+
+  SCREENS.owner_work = function () {
+    backButton(true);
+    var f = state.form;
+    var w = state.data.owner_work || { works: false, shift_rate: 0, pct_bp: 0 };
+    if (f.kind === undefined) {
+      f.kind = w.works && (w.shift_rate > 0 || w.pct_bp > 0) ? 'paid' : 'none';
+      f.rate = w.shift_rate ? String(w.shift_rate) : '';
+      f.pct = w.pct_bp ? String(w.pct_bp / 100).replace('.', ',') : '';
+    }
+    var rate = f.kind === 'paid' ? intOf(f.rate) : 0;
+    var bp = f.kind === 'paid' ? pctBp(f.pct) : 0;
+    var valid = rate !== null && bp !== null && (f.kind === 'none' || rate > 0 || bp > 0);
+    mainButton(state.sending ? 'Сохраняем…' : (w.works ? 'Сохранить' : 'Выходить в смену'), valid && !state.sending, function () {
+      submitOp('owner_work_set', { enabled: true, shift_rate: rate, pct_bp: bp }, w.works ? 'Сохранено' : 'Готово: кнопка «Я в смене» вверху', function () {
+        state.mode = 'shift'; state.screen = 'main'; render();
+      });
+    });
+    app.replaceChildren(
+      title('Вы работаете в смене сами?', 'Тогда касса покажет вам экраны флориста: продажи, приход, закрытие смены. Переключаться можно кнопкой вверху.'),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Как считать вашу оплату за смену' }),
+        chips([['none', 'Без оплаты'], ['paid', 'Ставка и процент']], f.kind, function (k) { f.kind = k; render(); })]),
+      f.kind === 'paid' ? formField('Ставка за смену, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.rate, oninput: function (e) { f.rate = e.target.value; render(); } })) : null,
+      f.kind === 'paid' ? formField('Процент от выручки, %', el('input', { class: 'input num', inputmode: 'decimal', value: f.pct, placeholder: 'например 3 или 2,5', oninput: function (e) { f.pct = e.target.value; render(); } }),
+        'Если процента нет, процент напарника не делится на вас.') : el('div', { class: 'muted center', text: 'Без оплаты: вы не получаете ставку и процент, а процент напарника не уменьшается.' }),
+      w.works ? el('button', { class: 'btn btn--close', disabled: state.sending, onclick: function () {
+        askOk('Больше не выходить в смену сами?', function () {
+          submitOp('owner_work_set', { enabled: false }, 'Режим смены выключен', function () { state.mode = 'owner'; openScreen('owner_manage'); });
+        });
+      } }, [icon('user-off'), 'Больше не выхожу в смену']) : null
+    );
   };
 
   /** Одно поле формы: подпись + ввод. */

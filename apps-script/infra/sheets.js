@@ -17,9 +17,27 @@ var SheetsStore = (function () {
   function create(ss) {
     var memo = {};
 
+    var checked = {};
+    /** Новая колонка в конце схемы появляется и в уже созданном листе (читаем по позициям, поэтому данные не сдвигаются). */
+    function ensureHeaders(sh, name) {
+      if (checked[name]) return;
+      checked[name] = true;
+      var cols = Schema.SHEETS[name];
+      if (!cols) return;
+      var have = sh.getLastColumn();
+      if (have >= cols.length) return;
+      var add = cols.slice(have);
+      sh.getRange(1, have + 1, 1, add.length).setValues([add.map(function (c) { return c.name; })]).setFontWeight('bold');
+      add.forEach(function (c, i) {
+        var range = sh.getRange(2, have + 1 + i, Math.max(1, sh.getMaxRows() - 1), 1);
+        if (c.type === 's') range.setNumberFormat('@');
+        if (c.type === 'n') range.setNumberFormat('0');
+      });
+    }
+
     function sheetOf(name) {
       var sh = ss.getSheetByName(name);
-      if (sh) return sh;
+      if (sh) { ensureHeaders(sh, name); return sh; }
       // Новый лист из схемы (появился в новой версии) создаётся сам: заголовки, текстовые форматы, защита.
       var cols = Schema.SHEETS[name];
       if (!cols) throw new Error('Нет листа ' + name + ' — запустите setup()');

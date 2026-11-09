@@ -92,16 +92,28 @@ var MiniApi = (function () {
     var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
     // Для открытия смены: сколько оставила прошлая смена и кто может работать вместе.
     var openInfo = null;
-    if (!shift && staff.role === 'florist') {
+    if (!shift && (staff.role === 'florist' || ownerWorks(staff))) {
       var closed = view.rows('shifts').filter(function (s) { return s.status === 'closed'; })
         .sort(function (a, b) { return a.closed_at < b.closed_at ? -1 : 1; });
       openInfo = {
         prev_cash: closed.length ? closed[closed.length - 1].next_cash : 0,
-        partners: view.rows('staff').filter(function (s) { return s.role === 'florist' && s.active === true && s.staff_id !== staff.staff_id; })
+        partners: view.rows('staff').filter(function (s) { return (s.role === 'florist' || (s.role === 'owner' && s.works_shifts === true)) && s.active === true && s.staff_id !== staff.staff_id; })
           .map(function (s) { return { staff_id: s.staff_id, name: s.name }; })
       };
     }
-    return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
+    // Ближайшая смена по графику для этого сотрудника (памятка на главной).
+    var todayStr = String(now).slice(0, 10);
+    var mine = view.rows('schedule').filter(function (e) { return e.status === 'active' && e.staff_id === staff.staff_id && e.date >= todayStr; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; })[0];
+    var nextShift = null;
+    if (mine) {
+      var staffNames = {};
+      view.rows('staff').forEach(function (s) { staffNames[s.staff_id] = s.name; });
+      nextShift = { date: mine.date, with: view.rows('schedule').filter(function (e) { return e.status === 'active' && e.date === mine.date && e.staff_id !== staff.staff_id; })
+        .map(function (e) { return staffNames[e.staff_id] || ''; }).filter(Boolean) };
+    }
+    var ownerWork = staff.role === 'owner' ? { works: staff.works_shifts === true, shift_rate: staff.shift_rate || 0, pct_bp: staff.pct_bp || 0 } : null;
+    return { me: { name: staff.name, role: staff.role }, owner_work: ownerWork, shop: { name: client.name || 'Флора·Учёт' }, next_shift: nextShift,
       shift: shiftInfo, open_info: openInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
@@ -134,8 +146,25 @@ var MiniApi = (function () {
   var OWNER_KINDS = {
     correction: true, anonymize: true, catalog_edit: true, new_item: true,
     staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
-    preorder_cancel: true, stock_start: true, debt_opening: true
+    preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true
   };
+
+  /** Владелица, которая выходит в смену, может делать то же, что флорист смены (D32). */
+  function ownerWorks(staff) { return staff.role === 'owner' && staff.works_shifts === true; }
+
+  /** График смен на месяц: видят все сотрудники точки (D31). */
+  function scheduleMonth(store, staff, now, month) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) month = String(now).slice(0, 7);
+    var names = {};
+    view.rows('staff').forEach(function (s) { names[s.staff_id] = s.name; });
+    var entries = view.rows('schedule').filter(function (e) { return e.status === 'active' && String(e.date).slice(0, 7) === month; })
+      .map(function (e) { return { date: e.date, staff_id: e.staff_id, name: names[e.staff_id] || '', note: e.note, me: e.staff_id === staff.staff_id }; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : 1); });
+    var people = staff.role === 'owner' ? view.rows('staff').filter(function (s) { return s.active === true && (s.role === 'florist' || s.role === 'owner') && s.anonymized !== true; })
+      .map(function (s) { return { staff_id: s.staff_id, name: s.name, role: s.role }; }) : [];
+    return { month: month, entries: entries, people: people, can_edit: staff.role === 'owner' };
+  }
 
   /** Одноразовый токен приглашения (не короче 16 символов). */
   function newToken() {
@@ -323,10 +352,11 @@ var MiniApi = (function () {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw apiError('BAD_INPUT', 'Период: даты ГГГГ-ММ-ДД');
       return { data: { sent: true }, notify: [], export: { from: from, to: to, staff: staff } };
     }
+    if (body.action === 'schedule') return { data: scheduleMonth(store, staff, now, String(body.month || '')), notify: [] };
     if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
     if (body.action === 'close_preview') {
       // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
-      if (staff.role !== 'florist') throw apiError('FORBIDDEN', 'Смену закрывает флорист');
+      if (staff.role !== 'florist' && !ownerWorks(staff)) throw apiError('FORBIDDEN', 'Смену закрывает флорист');
       var view = Ops.makeView(store, ctxOf(staff, now));
       var plan = Ops.build(view, 'close_shift', 'preview-' + staff.staff_id, {
         counted: body.counted, close_withdrawal: body.close_withdrawal || 0, expenses_confirmed: true
@@ -343,11 +373,12 @@ var MiniApi = (function () {
       }, notify: [] };
     }
     if (body.action === 'post') {
-      var allowed = staff.role === 'florist' ? FLORIST_KINDS[body.kind] : staff.role === 'owner' ? OWNER_KINDS[body.kind] : false;
+      var allowed = staff.role === 'florist' ? FLORIST_KINDS[body.kind]
+        : staff.role === 'owner' ? (OWNER_KINDS[body.kind] || (ownerWorks(staff) && FLORIST_KINDS[body.kind])) : false;
       if (!allowed) throw apiError('FORBIDDEN', 'Эта операция недоступна в кассе');
       var payload = body.payload || {};
       // Открытие смены: пустое место в составе — это сам флорист (ID берётся из проверенного входа, не из запроса).
-      if (staff.role === 'florist' && body.kind === 'open_shift' && Array.isArray(payload.florist_ids)) {
+      if ((staff.role === 'florist' || ownerWorks(staff)) && body.kind === 'open_shift' && Array.isArray(payload.florist_ids)) {
         payload = Object.assign({}, payload, { florist_ids: payload.florist_ids.map(function (id) { return id || staff.staff_id; }) });
       }
       // Токен приглашения создаёт сервер: касса его не присылает и не знает.

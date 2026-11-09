@@ -53,6 +53,7 @@ var Reports = (function () {
     L.push('');
     L.push('<b>ЗАРПЛАТА</b>');
     r.payroll.forEach(function (p) {
+      if (!p.total && !p.paid && !p.unpaid) return; // без оплаты (например, владелица в смене)
       var line = '  ' + person(p.staff_id) + ': ставка ' + money(p.rate) + ' + % ' + money(p.pct) + ' = ' + money(p.total);
       if (p.unpaid > 0) line += ' — <b>к доплате ' + money(p.unpaid) + '</b>';
       if (p.unpaid < 0) line += ' — <b>переплачено ' + money(-p.unpaid) + '</b> (решает владелица)';

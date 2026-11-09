@@ -167,11 +167,15 @@ var Calc = (function () {
     }
     var each = {};
     var total = 0;
+    // D32: процент делится между теми, у кого он есть. Владелица, вышедшая в смену без процента, долю флориста не уменьшает.
+    var withPct = 0;
+    for (var k = 0; k < n; k++) if (shiftStaff[k].pct_bp > 0) withPct++;
+    var share = withPct >= 1 ? withPct : 1;
     for (var i = 0; i < n; i++) {
       var s = shiftStaff[i];
       if (each[s.staff_id]) throw calcError('DUPLICATE_STAFF', 'Флорист указан в смене дважды: ' + s.staff_id);
       var rate = assertNonNegative(s.shift_rate, 'ставка');
-      var pct = floristPct(revenue, s.pct_bp, n);
+      var pct = floristPct(revenue, s.pct_bp, share);
       each[s.staff_id] = { rate: rate, pct: pct, total: assertInt(rate + pct, 'ЗП') };
       total = assertInt(total + rate + pct, 'ЗП всего');
     }

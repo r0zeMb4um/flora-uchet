@@ -23,7 +23,7 @@ var Ops = (function () {
   // Листы, где у строки есть точка (point_id). Остальные — общие на клиента.
   var POINT_SHEETS = {
     shifts: true, shift_staff: true, receipts: true, payments: true, stock_moves: true,
-    cash_ops: true, debt_moves: true, reservations: true, owner_expenses: true, staff: true, invites: true
+    cash_ops: true, debt_moves: true, reservations: true, owner_expenses: true, staff: true, invites: true, schedule: true
   };
   var CATEGORIES = ['flowers', 'greens', 'toys', 'baskets', 'packaging'];
   var DEFECT_REASONS = ['arrived_bad', 'wilted', 'broken', 'gift', 'other'];
@@ -283,7 +283,8 @@ var Ops = (function () {
     if (ids.indexOf(view.ctx.staff_id) < 0) throw opsError('NOT_ON_SHIFT', 'Открывающий смену должен быть в её составе');
     var staff = ids.map(function (id) {
       var s = view.staff(id);
-      if (!s || s.active !== true || s.role !== 'florist') throw opsError('UNKNOWN_STAFF', 'Нет активного флориста: ' + id);
+      var okRole = s && (s.role === 'florist' || (s.role === 'owner' && s.works_shifts === true));
+      if (!s || s.active !== true || !okRole) throw opsError('UNKNOWN_STAFF', 'Нет активного сотрудника для смены: ' + id);
       return s;
     });
     var shifts = view.rows('shifts');
@@ -866,6 +867,52 @@ var Ops = (function () {
     if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
     update(plan, 'staff', { staff_id: s.staff_id, client_id: plan.client_id }, s, set);
     plan.result = { staff_id: s.staff_id, set: set };
+  };
+
+  /**
+   * График смен (D31): владелица ставит на день одного или двух сотрудников (или очищает день). Это только памятка:
+   * график никого не ограничивает и ничего не рассылает. Прежние записи дня помечаются «replaced», не удаляются.
+   */
+  H.schedule_set = function (view, p, plan) {
+    requireOwner(view);
+    var date = dateStr(p.date, 'дата');
+    var today = view.ctx.now.slice(0, 10);
+    var last = new Date(Date.parse(today + 'T00:00:00Z') + 400 * 86400000).toISOString().slice(0, 10);
+    if (date > last) throw opsError('BAD_INPUT', 'График ставится не дальше чем на год вперёд');
+    var ids = Array.isArray(p.staff_ids) ? p.staff_ids : [];
+    if (ids.length > 2) throw opsError('BAD_INPUT', 'В смене не больше двух человек');
+    if (ids.length === 2 && ids[0] === ids[1]) throw opsError('BAD_INPUT', 'Один и тот же человек указан дважды');
+    ids.forEach(function (id) {
+      var s = view.staff(id);
+      if (!s || s.active !== true || (s.role !== 'florist' && s.role !== 'owner')) throw opsError('UNKNOWN_STAFF', 'Нет активного сотрудника: ' + id);
+    });
+    var note = optText(p.note, 'пометка', 100);
+    view.rows('schedule').filter(function (e) { return e.date === date && e.status === 'active'; }).forEach(function (e) {
+      update(plan, 'schedule', { entry_id: e.entry_id, client_id: plan.client_id }, e, { status: 'replaced' });
+    });
+    ids.forEach(function (id) {
+      add(plan, view, 'schedule', { entry_id: nextId(plan, 'sc'), date: date, staff_id: id, note: note, status: 'active' });
+    });
+    plan.result = { date: date, count: ids.length };
+  };
+
+  /**
+   * Владелица выходит в смену сама (D32): при первом включении она сама решает, как считать ей оплату
+   * (0 и 0 — без оплаты). Условия действуют со следующей смены.
+   */
+  H.owner_work_set = function (view, p, plan) {
+    requireOwner(view);
+    var me = view.staff(view.ctx.staff_id);
+    if (!me || me.role !== 'owner') throw opsError('FORBIDDEN', 'Это настройка владелицы');
+    if (typeof p.enabled !== 'boolean') throw opsError('BAD_INPUT', 'Выходите вы в смену или нет?');
+    var set = { works_shifts: p.enabled };
+    if (p.enabled) {
+      set.shift_rate = nonNegInt(p.shift_rate, 'ставка');
+      set.pct_bp = nonNegInt(p.pct_bp, 'процент');
+      if (set.pct_bp > 10000) throw opsError('BAD_INPUT', 'Процент не больше 100');
+    }
+    update(plan, 'staff', { staff_id: me.staff_id, client_id: plan.client_id }, me, set);
+    plan.result = { enabled: p.enabled, shift_rate: set.shift_rate || 0, pct_bp: set.pct_bp || 0 };
   };
 
   /** Отключить или вернуть доступ. Отключённый теряет доступ сразу, его записи остаются. */

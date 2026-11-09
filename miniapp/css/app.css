@@ -437,3 +437,15 @@ body.on-sale #app .input, body.on-sale #app .search { font-size: 14px; }
 .ctl { padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .1); font-size: 14px; }
 .ctl:first-of-type { border-top: 0; }
 .ctl--below_catalog, .ctl--cancel, .ctl--refund { color: #ffd0d0; }
+
+/* График смен */
+.sch { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.sch__wd { text-align: center; font-size: 12px; opacity: .7; padding: 2px 0; }
+.sch__cell { min-height: 54px; border-radius: 10px; padding: 4px 3px; font: inherit; color: inherit; text-align: center;
+  background: var(--glass); border: 1px solid rgba(255, 255, 255, .12); display: flex; flex-direction: column; gap: 1px; align-items: center; }
+.sch__cell--empty { background: transparent; border-color: transparent; }
+.sch__cell--today { border-color: var(--rose-soft); box-shadow: 0 0 0 1px var(--rose-soft) inset; }
+.sch__cell--me { background: rgba(240, 124, 160, .28); }
+.sch__who { font-size: 10px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; max-width: 100%; white-space: nowrap; opacity: .9; }
+
+.modeswitch { margin-left: auto; font-size: 13px; padding: 6px 12px; }

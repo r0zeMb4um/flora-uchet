@@ -19,7 +19,7 @@ var Schema = (function () {
     points: cols('point_id client_id name address' + META),
     settings: cols('client_id point_id change_fund:n reminder_time cash_tolerance:n expense_items' + META),
     catalog: cols('item_id client_id code category name unit sale_price:n last_cost:n min_stock:n status created_by' + META),
-    staff: cols('staff_id client_id point_id telegram_id name role shift_rate:n pct_bp:n consent_at consent_version active:b' + META),
+    staff: cols('staff_id client_id point_id telegram_id name role shift_rate:n pct_bp:n consent_at consent_version active:b' + META + ' works_shifts:b'),
     invites: cols('token client_id point_id staff_id expires_at status used_by_telegram_id' + META),
     customers: cols('customer_id client_id name note phone phone_consent_at anonymized:b' + META),
     ops_log: cols('op_id client_id point_id shift_id kind actor_staff_id status created_at posted_at plan_json result_json'),
@@ -36,6 +36,7 @@ var Schema = (function () {
     stock_balance: cols('client_id point_id item_id qty:n last_op_id updated_at'),
     cash_ops: cols('cash_id client_id point_id shift_id type amount:n staff_id comment' + META),
     owner_expenses: cols('expense_id client_id point_id month item amount:n comment created_by' + META),
+    schedule: cols('entry_id client_id point_id date staff_id note status' + META),
     bouquet_templates: cols('template_id client_id name items_json price:n status created_by' + META),
     audit: cols('ts actor_telegram_id action details_json')
   };
