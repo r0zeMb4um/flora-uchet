@@ -124,6 +124,9 @@ test('владелица с оплатой: ставка и процент сч�
   const rep = Ops.shiftReport(view, store.tables.shifts[0].shift_id);
   const by = Object.fromEntries(rep.payroll.map((p) => [p.staff_id, p]));
   assert.deepEqual([by.s_owner.rate, by.s_owner.pct, by.s_mira.pct], [3000, 150, 150]);
+  assert.throws(() => post(1, 'owner_work_set', { enabled: false }), { code: 'SHIFT_OPEN' }, 'нельзя выключить режим, пока она в открытой смене');
+  post(1, 'inventory', { facts: Object.fromEntries(call(1, { action: 'bootstrap' }).catalog.map((c) => [c.item_id, c.stock])) });
+  post(1, 'close_shift', { expenses_confirmed: true, counted: 10000 });
   post(1, 'owner_work_set', { enabled: false });
   assert.throws(() => post(1, 'sale', { items: [{ item_id: 'rose', qty: 1 }], price: 1000, payments: [{ method: 'cash', amount: 1000 }] }), { code: 'FORBIDDEN' });
   assert.equal(call(1, { action: 'bootstrap' }).owner_work.works, false);

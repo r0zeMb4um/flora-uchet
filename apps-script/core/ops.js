@@ -905,6 +905,13 @@ var Ops = (function () {
     var me = view.staff(view.ctx.staff_id);
     if (!me || me.role !== 'owner') throw opsError('FORBIDDEN', 'Это настройка владелицы');
     if (typeof p.enabled !== 'boolean') throw opsError('BAD_INPUT', 'Выходите вы в смену или нет?');
+    if (!p.enabled) {
+      // Выключить режим посреди своей смены нельзя: без прав смену не закрыть.
+      var open = view.openShift();
+      if (open && view.shiftStaff(open.shift_id).some(function (x) { return x.staff_id === me.staff_id; })) {
+        throw opsError('SHIFT_OPEN', 'Вы сейчас в открытой смене — сначала закройте её');
+      }
+    }
     var set = { works_shifts: p.enabled };
     if (p.enabled) {
       set.shift_rate = nonNegInt(p.shift_rate, 'ставка');
