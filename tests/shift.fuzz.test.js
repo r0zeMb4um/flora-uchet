@@ -222,6 +222,7 @@ function checkInvariants(store, v, seed, log) {
   const shifts = v.rows('shifts');
   let prevNext = 0;
   for (const s of shifts) {
+    if (s === shifts[0]) prevNext = s.open_cash; // первая смена магазина: касса принимается как есть (D33)
     const r = Ops.shiftReport(v, s.shift_id);
     assert.equal(r.sales_cash + r.sales_card + r.sales_debt + r.preorder_unpaid, r.revenue, 'тождество выручки ' + where());
     assert.equal(s.prev_next_cash, prevNext, 'приём кассы = остаток прошлой смены ' + where());

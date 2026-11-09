@@ -181,13 +181,13 @@ test('открытие смены в кассе: открытая информа
   const { call, post, store } = shop();
   store.seed('staff', [{ staff_id: 's_mira', client_id: 'c1', point_id: 'p1', telegram_id: '888', name: 'Мира', role: 'florist', shift_rate: 5000, pct_bp: 300, active: true }]);
   const info = call(777, { action: 'bootstrap' }).open_info;
-  assert.deepEqual(info, { prev_cash: 0, partners: [{ staff_id: 's_mira', name: 'Мира' }] });
+  assert.deepEqual(info, { first: true, prev_cash: 0, partners: [{ staff_id: 's_mira', name: 'Мира' }] });
   assert.equal(call(1, { action: 'bootstrap' }).open_info, null, 'владелица смену не открывает');
   assert.throws(() => post(1, 'open_shift', { florist_ids: ['s_anna'], open_cash: 0 }), { code: 'FORBIDDEN' });
   const res = post(777, 'open_shift', { florist_ids: ['', 's_mira'], open_cash: 300 });
   assert.equal(res.data.result.shift_no, 1);
-  assert.equal(res.data.result.open_diff, 300);
-  assert.ok(res.notify.some((n) => n.kind === 'open_diff'));
+  assert.equal(res.data.result.open_diff, 0, 'самая первая смена: стартовая касса, не расхождение');
+  assert.ok(!res.notify.some((n) => n.kind === 'open_diff'));
   assert.deepEqual(store.tables.shift_staff.map((r) => r.staff_id).sort(), ['s_anna', 's_mira']);
   assert.equal(call(777, { action: 'bootstrap' }).open_info, null, 'смена открыта — подсказка не нужна');
   assert.throws(() => post(777, 'open_shift', { florist_ids: [''], open_cash: 0 }), { code: 'SHIFT_ALREADY_OPEN' });
@@ -233,4 +233,54 @@ test('старые долги: запись «с даты», видны в сп�
   assert.equal(call(777, { action: 'bootstrap' }).customers.find((c) => c.name === 'Сауле').debt, 15000);
   assert.throws(() => MiniApi.dispatch(store, 777, { ...body, op_id: 'op-debt-0000002' }, NOW), { code: 'FORBIDDEN' });
   assert.throws(() => MiniApi.dispatch(store, 1, { ...body, op_id: 'op-debt-0000003', payload: { ...body.payload, since_date: '2026-13-01' } }, NOW), { code: 'BAD_INPUT' });
+});
+
+// ---------- загрузка каталога списком (D33) ----------
+
+test('загрузка каталога списком: позиции, стартовый остаток и закупка — по желанию, одной операцией', () => {
+  const { call, post } = shop();
+  const lines = [
+    { name: 'Пион розовый', sale_price: 1500, min_stock: 10, qty: 40, cost: 900 },
+    { name: 'Эвкалипт', sale_price: 500, qty: 100 },          // закупка не указана — это допустимо
+    { name: 'Крафт-бумага', sale_price: 300 }                  // без остатка
+  ];
+  const res = post(1, 'catalog_import', { category: 'flowers', lines });
+  assert.deepEqual(res.data.result, { items: 3, with_stock: 2 });
+  const cat = call(1, { action: 'owner_catalog' });
+  const peony = cat.find((c) => c.name === 'Пион розовый');
+  assert.deepEqual([peony.price, peony.min, peony.stock, peony.cost, peony.status], [1500, 10, 40, 900, 'active']);
+  const euc = cat.find((c) => c.name === 'Эвкалипт');
+  assert.deepEqual([euc.stock, euc.cost], [100, 0]);
+  assert.equal(cat.find((c) => c.name === 'Крафт-бумага').stock, 0);
+  assert.equal(call(777, { action: 'bootstrap' }).catalog.find((c) => c.name === 'Пион розовый').stock, 40, 'флорист видит остаток сразу');
+});
+
+test('загрузка каталога: повторы названий — предупреждение; во время смены остаток вносить нельзя; флористу закрыто; лимит строк', () => {
+  const { call, post } = shop();
+  assert.throws(() => post(777, 'catalog_import', { category: 'flowers', lines: [{ name: 'X', sale_price: 1 }] }), { code: 'FORBIDDEN' });
+  post(1, 'catalog_import', { category: 'flowers', lines: [{ name: 'Тюльпан', sale_price: 400 }] });
+  assert.throws(() => post(1, 'catalog_import', { category: 'flowers', lines: [{ name: 'тюльпан', sale_price: 400 }] }), { code: 'SIMILAR_ITEMS' });
+  assert.throws(() => post(1, 'catalog_import', { category: 'flowers', lines: [{ name: 'Лилия', sale_price: 1 }, { name: 'ЛИЛИЯ', sale_price: 1 }] }), { code: 'SIMILAR_ITEMS' }, 'повтор внутри списка');
+  post(1, 'catalog_import', { category: 'flowers', confirm_dups: true, lines: [{ name: 'Тюльпан', sale_price: 450 }] });
+  assert.equal(call(1, { action: 'owner_catalog' }).filter((c) => c.name === 'Тюльпан').length, 2);
+  assert.throws(() => post(1, 'catalog_import', { category: 'flowers', lines: Array.from({ length: 201 }, (_, i) => ({ name: 'П' + i, sale_price: 1 })) }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(1, 'catalog_import', { category: 'вещи', lines: [{ name: 'Z', sale_price: 1 }] }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(1, 'catalog_import', { category: 'flowers', lines: [{ name: 'Z', sale_price: 0 }] }), { code: 'BAD_INPUT' });
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  assert.throws(() => post(1, 'catalog_import', { category: 'greens', lines: [{ name: 'Плющ', sale_price: 200, qty: 5 }] }), { code: 'SHIFT_OPEN' });
+  post(1, 'catalog_import', { category: 'greens', lines: [{ name: 'Плющ', sale_price: 200 }] }); // без остатка — можно и в смену
+});
+
+test('закупочная цена: меняется в карточке позиции, по желанию; без неё брак в «Контроле» помечается «цена не указана»', () => {
+  const { call, post, store, owner, seedPost } = shop();
+  seedPost(owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 50 }] });
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  assert.throws(() => post(777, 'catalog_edit', { item_id: 'rose', last_cost: 100 }), { code: 'FORBIDDEN' });
+  post(1, 'catalog_edit', { item_id: 'rose', last_cost: 0 }); // закупка пока неизвестна — так и бывает на старте
+  post(777, 'defect', { lines: [{ item_id: 'rose', qty: 2, reason: 'wilted' }] });
+  const view = () => Ops.makeView(store, { client_id: 'c1', point_id: 'p1', staff_id: 's_owner', role: 'owner', now: NOW });
+  const noCost = Ops.shiftReport(view(), view().openShift().shift_id).control.items.find((i) => i.kind === 'defect');
+  assert.ok(noCost.text.includes('закупочная цена не указана'));
+  post(1, 'catalog_edit', { item_id: 'rose', last_cost: 650 });
+  assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').cost, 650);
 });

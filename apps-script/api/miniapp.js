@@ -96,6 +96,7 @@ var MiniApi = (function () {
       var closed = view.rows('shifts').filter(function (s) { return s.status === 'closed'; })
         .sort(function (a, b) { return a.closed_at < b.closed_at ? -1 : 1; });
       openInfo = {
+        first: view.rows('shifts').length === 0,
         prev_cash: closed.length ? closed[closed.length - 1].next_cash : 0,
         partners: view.rows('staff').filter(function (s) { return (s.role === 'florist' || (s.role === 'owner' && s.works_shifts === true)) && s.active === true && s.staff_id !== staff.staff_id; })
           .map(function (s) { return { staff_id: s.staff_id, name: s.name }; })
@@ -146,7 +147,7 @@ var MiniApi = (function () {
   var OWNER_KINDS = {
     correction: true, anonymize: true, catalog_edit: true, new_item: true,
     staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
-    preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true
+    preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true, catalog_import: true
   };
 
   /** Владелица, которая выходит в смену, может делать то же, что флорист смены (D32). */

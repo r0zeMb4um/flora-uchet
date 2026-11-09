@@ -290,8 +290,10 @@ var Ops = (function () {
     var shifts = view.rows('shifts');
     var closed = shifts.filter(function (s) { return s.status === 'closed'; })
       .sort(function (a, b) { return a.closed_at < b.closed_at ? -1 : 1; });
-    var prev = closed.length ? closed[closed.length - 1].next_cash : 0;
     var openCash = nonNegInt(p.open_cash, 'наличные на начало');
+    // Самая первая смена магазина: прошлой кассы нет, принятая сумма — стартовая, расхождения не бывает (D33).
+    var first = shifts.length === 0;
+    var prev = first ? openCash : (closed.length ? closed[closed.length - 1].next_cash : 0);
     var diff = C.openDiff(openCash, prev);
     var shiftId = 'sh-' + plan.op_id;
     plan.shift_id = shiftId;
@@ -743,7 +745,7 @@ var Ops = (function () {
       defectQty += -m.qty;
       defectCost += typeof m.cost_sum === 'number' ? m.cost_sum : C.lossCost(-m.qty, (view.item(m.item_id) || {}).last_cost || 0);
     });
-    if (defectQty) push('defect', 'Брак: ' + defectQty + ' шт на ' + tenge(defectCost) + ' по закупке', defectCost);
+    if (defectQty) push('defect', defectCost > 0 ? 'Брак: ' + defectQty + ' шт на ' + tenge(defectCost) + ' по закупке' : 'Брак: ' + defectQty + ' шт (закупочная цена не указана)', defectCost);
     n.cash_ops.forEach(function (o) {
       var note = o.comment ? ' — ' + o.comment : '';
       if (o.type === 'delivery') push('expense', 'Расход (доставка): ' + tenge(o.amount) + note, o.amount);
@@ -1003,11 +1005,60 @@ var Ops = (function () {
     var set = {};
     if (p.sale_price !== undefined) set.sale_price = posInt(p.sale_price, 'цена продажи');
     if (p.min_stock !== undefined) set.min_stock = nonNegInt(p.min_stock, 'минимальный остаток');
+    if (p.last_cost !== undefined) set.last_cost = nonNegInt(p.last_cost, 'закупка за штуку');
     if (p.status !== undefined) set.status = oneOf(p.status, ['active', 'hidden'], 'статус');
     if (p.name !== undefined) set.name = text(p.name, 'название', 80);
     if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
     update(plan, 'catalog', { item_id: it.item_id, client_id: plan.client_id }, it, set);
     plan.result = { item_id: it.item_id, set: set };
+  };
+
+  /**
+   * Загрузка каталога списком (D33): новые позиции, при желании — стартовый остаток и закупочная цена за штуку.
+   * Строки: { name, sale_price, min_stock?, qty?, cost? }. Остаток вносится, только когда смена закрыта.
+   * Всё — одной операцией: либо вся пачка, либо ничего.
+   */
+  H.catalog_import = function (view, p, plan) {
+    requireOwner(view);
+    var lines = list(p.lines, 'позиции');
+    if (lines.length > 200) throw opsError('BAD_INPUT', 'За один раз — не больше 200 позиций');
+    var category = oneOf(p.category, CATEGORIES, 'категория');
+    var seen = {};
+    view.rows('catalog').forEach(function (c) { seen[String(c.name).toLowerCase()] = true; });
+    var dups = [];
+    var anyQty = false;
+    var rows = lines.map(function (l, k) {
+      var name = text(l.name, 'название', 80);
+      var key = name.toLowerCase();
+      if (seen[key]) dups.push({ name: name });
+      seen[key] = true;
+      var qty = l.qty === undefined || l.qty === '' ? 0 : nonNegInt(l.qty, 'остаток');
+      if (qty > 0) anyQty = true;
+      return {
+        k: k, name: name, sale_price: posInt(l.sale_price, 'цена продажи'),
+        min_stock: l.min_stock === undefined || l.min_stock === '' ? 0 : nonNegInt(l.min_stock, 'минимальный остаток'),
+        qty: qty, cost: l.cost === undefined || l.cost === '' ? 0 : nonNegInt(l.cost, 'закупка за штуку')
+      };
+    });
+    if (dups.length && p.confirm_dups !== true) {
+      throw opsError('SIMILAR_ITEMS', 'Такие названия уже есть: ' + dups.slice(0, 5).map(function (d) { return d.name; }).join(', '), dups);
+    }
+    if (anyQty && view.openShift()) throw opsError('SHIFT_OPEN', 'Остатки вносятся, когда смена закрыта');
+    rows.forEach(function (r) {
+      var id = 'i-' + plan.op_id + '-' + r.k;
+      add(plan, view, 'catalog', {
+        item_id: id, code: '', category: category, name: r.name, unit: 'шт', sale_price: r.sale_price,
+        last_cost: r.cost, min_stock: r.min_stock, status: 'active', created_by: view.ctx.staff_id
+      });
+      if (r.qty > 0) {
+        add(plan, view, 'stock_moves', {
+          move_id: nextId(plan, 'mv'), shift_id: '', type: 'start', item_id: id, qty: r.qty,
+          cost_sum: r.cost > 0 ? r.cost * r.qty : '', supplier_or_reason: 'старт', receipt_id: ''
+        });
+        touchStock(plan, id);
+      }
+    });
+    plan.result = { items: rows.length, with_stock: rows.filter(function (r) { return r.qty > 0; }).length };
   };
 
   /** Настройки точки (владелица): размен, время напоминания, статьи расходов месяца. */

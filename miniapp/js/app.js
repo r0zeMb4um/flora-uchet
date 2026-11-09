@@ -874,14 +874,14 @@
     owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_manage'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
     owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
     owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', owner_day: 'schedule', schedule: 'owner_manage', owner_work: 'owner_manage'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', owner_day: 'schedule', schedule: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_catalog'
   };
   function renderNav() {
     var nav = document.getElementById('nav');
@@ -2214,6 +2214,7 @@
       app.replaceChildren.apply(app, [
         el('h1', { class: 'h1', text: 'Склад и каталог' }),
         el('button', { class: 'btn btn--primary', onclick: function () { openScreen('owner_item_new'); } }, [icon('plus'), 'Новая позиция']),
+        el('button', { class: 'btn', onclick: function () { openScreen('owner_import'); } }, [icon('list-details'), 'Загрузить списком']),
         search,
         chips(cats, f.cat, function (k) { f.cat = k; render(); })
       ].concat(rows.length ? rows : [emptyState('Ничего не найдено', 'Измените поиск или категорию')]));
@@ -2227,10 +2228,10 @@
     var f = state.form;
     var info = state.data.open_info;
     if (!info) { state.screen = 'main'; render(); return; }
-    if (f.cash === undefined) { f.cash = String(info.prev_cash); f.partner = ''; }
+    if (f.cash === undefined) { f.cash = info.first ? '' : String(info.prev_cash); f.partner = ''; }
     function upd() {
       var cash = intOf(f.cash);
-      var diff = cash === null ? null : cash - info.prev_cash;
+      var diff = cash === null || info.first ? null : cash - info.prev_cash;
       var note = document.getElementById('open-diff');
       if (note) note.textContent = diff ? 'Расхождение с тем, что оставила прошлая смена: ' + (diff > 0 ? '+' : '−') + money(Math.abs(diff)) + '. Владелица получит сообщение.' : '';
       mainButton(state.sending ? 'Открываем…' : 'Открыть смену', cash !== null && !state.sending, function () {
@@ -2239,7 +2240,7 @@
       });
     }
     app.replaceChildren(
-      title('Открытие смены', 'Прошлая смена оставила в кассе ' + money(info.prev_cash) + ' (размен внутри)'),
+      title(info.first ? 'Первая смена магазина' : 'Открытие смены', info.first ? 'Пересчитайте деньги в кассе: эта сумма станет стартовой' : 'Прошлая смена оставила в кассе ' + money(info.prev_cash) + ' (размен внутри)'),
       formField('Сколько наличных в кассе сейчас, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.cash, oninput: function (e) { f.cash = e.target.value; upd(); } }),
         'Пересчитайте деньги. Если сумма другая — впишите её, владелица увидит расхождение.'),
       el('div', { id: 'open-diff', class: 'muted', style: 'min-height:18px' }),
@@ -2515,6 +2516,78 @@
     );
   };
 
+  // ---------- загрузка каталога списком (D33) ----------
+
+  /** Разбор вставленного текста: название; цена; остаток; закупка; минимум (разделитель — «;» или табуляция из Excel). */
+  function positionsWord(n) {
+    var m = n % 100, d = n % 10;
+    return m > 10 && m < 20 ? 'позиций' : d === 1 ? 'позицию' : d > 1 && d < 5 ? 'позиции' : 'позиций';
+  }
+  function parseImport(text) {
+    var out = { ok: [], bad: [] };
+    String(text || '').split(/\r?\n/).forEach(function (raw, i) {
+      var line = raw.trim();
+      if (!line) return;
+      var parts = line.split(/[;\t]/).map(function (x) { return x.trim(); });
+      var name = parts[0];
+      var price = intOf(parts[1]);
+      var opt = function (v) { return v === undefined || v === '' ? 0 : intOf(v); };
+      var qty = opt(parts[2]), cost = opt(parts[3]), min = opt(parts[4]);
+      if (!name || name.length > 80) out.bad.push('Строка ' + (i + 1) + ': нет названия');
+      else if (!price || price <= 0) out.bad.push('Строка ' + (i + 1) + ' («' + name.slice(0, 20) + '»): цена должна быть числом больше нуля');
+      else if (qty === null || cost === null || min === null) out.bad.push('Строка ' + (i + 1) + ' («' + name.slice(0, 20) + '»): остаток, закупка и минимум — числа');
+      else out.ok.push({ name: name, sale_price: price, qty: qty, cost: cost, min_stock: min });
+    });
+    return out;
+  }
+
+  SCREENS.owner_import = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.text === undefined) { f.text = ''; f.category = 'flowers'; }
+    var parsed = parseImport(f.text);
+    var withStock = parsed.ok.filter(function (r) { return r.qty > 0; }).length;
+    var send = function () {
+      busy(postOp('catalog_import', { category: f.category, lines: parsed.ok, confirm_dups: f.confirm === true }, f.op_id).catch(function (e) {
+        if (e && e.code === 'SIMILAR_ITEMS') { f.dups = (e.details || []).map(function (d) { return d.name; }); f.confirm = true; return null; }
+        throw e;
+      })).then(function (res) {
+        if (!res) { if (f.dups) { toast('Такие названия уже есть. Проверьте список. Если это новые позиции — нажмите кнопку ещё раз.', true); render(); } return; }
+        if (res.state) setData(res.state, true);
+        haptic('success'); toast('Загружено позиций: ' + parsed.ok.length);
+        openScreen('owner_catalog');
+      });
+    };
+    mainButton(state.sending ? 'Загружаем…' : 'Загрузить ' + parsed.ok.length + ' ' + positionsWord(parsed.ok.length),
+      parsed.ok.length > 0 && !parsed.bad.length && !state.sending, function () {
+        askOk('Загрузить ' + parsed.ok.length + ' позиций' + (withStock ? ', по ' + withStock + ' из них с остатком' : '') + '?', send);
+      });
+    var nodes = [
+      title('Загрузить списком', 'Вставьте строки: название; цена; остаток; закупка; минимум'),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Категория для всего списка' }),
+        chips(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; }), f.category, function (k) { f.category = k; render(); })]),
+      el('div', { class: 'card card--note' }, [
+        el('div', { text: 'Пример строки: Пион розовый; 1500; 40; 900; 10' }),
+        el('div', { class: 'muted', text: 'Обязательны название и цена. Остаток, закупка и минимум — по желанию. Закупку можно не знать: оставьте пустой или поставьте «;» без числа. Из Excel можно вставлять столбцами.' }),
+        el('div', { class: 'muted', text: 'Остаток вносится только когда смена закрыта.' })]),
+      (function () {
+        var ta = el('textarea', { class: 'input', rows: '8', placeholder: 'Роза красная 60 см; 1200; 80; 650; 20\nЭвкалипт; 500; 100', 'aria-label': 'Список позиций',
+        oninput: function (e) { f.text = e.target.value; f.confirm = false; f.dups = null; render(); } });
+        ta.value = f.text;
+        return ta;
+      })()
+    ];
+    if (f.text.trim()) {
+      nodes.push(el('div', { class: 'card' }, [
+        el('div', { class: 'sum' }, [el('span', { text: 'Распознано позиций' }), el('b', { class: 'num', text: String(parsed.ok.length) })]),
+        withStock ? el('div', { class: 'muted', text: 'С остатком: ' + withStock }) : null
+      ]));
+      if (parsed.bad.length) nodes.push(el('div', { class: 'card card--note' }, parsed.bad.slice(0, 6).map(function (b) { return el('div', { text: b }); })));
+      if (f.dups && f.dups.length) nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Эти названия уже есть: ' + f.dups.slice(0, 5).join(', ') }), el('div', { class: 'muted', text: 'Если это другие позиции — нажмите «Загрузить» ещё раз.' })]));
+    }
+    app.replaceChildren.apply(app, nodes);
+  };
+
   /** Одно поле формы: подпись + ввод. */
   function formField(label, input, hint) {
     return el('label', { class: 'card', style: 'display:flex;flex-direction:column;gap:6px' }, [
@@ -2526,14 +2599,15 @@
     var f = state.form;
     var it = f.item;
     if (!it) { openScreen('owner_catalog'); return; }
-    if (f.name === undefined) { f.name = it.name; f.price = String(it.price); f.min = String(it.min); }
-    var price = intOf(f.price), min = intOf(f.min);
+    if (f.name === undefined) { f.name = it.name; f.price = String(it.price); f.min = String(it.min); f.cost = it.cost ? String(it.cost) : ''; }
+    var price = intOf(f.price), min = intOf(f.min), cost = intOf(f.cost);
     var payload = { item_id: it.item_id };
     if (f.name.trim() && f.name.trim() !== it.name) payload.name = f.name.trim();
     if (price !== null && price > 0 && price !== it.price) payload.sale_price = price;
     if (min !== null && min >= 0 && min !== it.min) payload.min_stock = min;
+    if (cost !== null && cost !== (it.cost || 0)) payload.last_cost = cost;
     var changed = Object.keys(payload).length > 1;
-    var valid = f.name.trim().length > 0 && price !== null && price > 0 && min !== null && min >= 0;
+    var valid = f.name.trim().length > 0 && price !== null && price > 0 && min !== null && min >= 0 && (f.cost === '' || cost !== null);
     mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', changed && valid && !state.sending, function () {
       submitOp('catalog_edit', payload, 'Сохранено', function () { openScreen('owner_catalog'); });
     });
@@ -2545,6 +2619,8 @@
         'Новая цена действует для следующих продаж. Старые чеки не меняются.'),
       formField('Минимальный остаток, шт', el('input', { class: 'input num', inputmode: 'numeric', value: f.min, oninput: function (e) { f.min = e.target.value; render(); } }),
         'Ниже этого числа позиция попадёт в «Заканчиваются» и в закупку.'),
+      formField('Закупка за штуку, ₸ (по желанию)', el('input', { class: 'input num', inputmode: 'numeric', value: f.cost, placeholder: 'не указана', oninput: function (e) { f.cost = e.target.value; render(); } }),
+        'Нужна, чтобы оценивать брак и недостачи. Пока не знаете — оставьте пустой, потом заполнится приходом или здесь.'),
       it.status === 'review' ? el('button', { class: 'btn btn--primary', disabled: state.sending, onclick: function () {
         submitOp('catalog_edit', { item_id: it.item_id, status: 'active' }, 'Позиция подтверждена', function () { openScreen('owner_catalog'); });
       } }, [icon('check'), 'Подтвердить новую позицию']) : null,

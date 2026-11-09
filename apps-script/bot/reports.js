@@ -74,7 +74,7 @@ var Reports = (function () {
     }
     var goods = [];
     r.income.forEach(function (m) { goods.push('  приход: ' + item(m.item_id) + ' +' + m.qty + ' (' + money(m.cost_sum) + ')'); });
-    r.defects.forEach(function (m) { goods.push('  брак: ' + item(m.item_id) + ' ' + signed(m.qty) + ' (' + money(m.cost) + ' по закупке)'); });
+    r.defects.forEach(function (m) { goods.push('  брак: ' + item(m.item_id) + ' ' + signed(m.qty) + (m.cost > 0 ? ' (' + money(m.cost) + ' по закупке)' : ' (закупка не указана)')); });
     r.adjustments.forEach(function (m) { goods.push('  инвентаризация: ' + item(m.item_id) + ' ' + signed(m.qty) + ' (' + money(m.cost) + ')'); });
     r.below_min.forEach(function (b) { goods.push('  ниже минимума: ' + item(b.item_id) + ' — ' + b.qty + ' / ' + b.min); });
     if (goods.length) { L.push(''); L.push('<b>ТОВАР</b>'); L.push.apply(L, goods); }
