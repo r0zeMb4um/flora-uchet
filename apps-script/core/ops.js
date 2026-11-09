@@ -190,9 +190,12 @@ var Ops = (function () {
 
   function activeItem(view, id, allowHidden) {
     var it = view.item(id);
-    if (!it || (it.status === 'hidden' && !allowHidden)) throw opsError('UNKNOWN_ITEM', 'Нет такой позиции в каталоге: ' + id);
+    if (!it || it.status === 'deleted' || (it.status === 'hidden' && !allowHidden)) throw opsError('UNKNOWN_ITEM', 'Нет такой позиции в каталоге: ' + id);
     return it;
   }
+
+  /** Позиция в каталоге «живая»: не скрыта и не удалена владелицей (история чеков при этом остаётся). */
+  function listed(c) { return c.status !== 'hidden' && c.status !== 'deleted'; }
 
   /** Покупатель: существующий { customer_id } или новый { new_customer: { name, note } }. */
   function customerRef(view, plan, ref) {
@@ -518,6 +521,7 @@ var Ops = (function () {
     var name = text(p.name, 'название', 80);
     var words = name.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; });
     var similar = view.rows('catalog').filter(function (c) {
+      if (c.status === 'deleted') return false;
       var n = String(c.name).toLowerCase();
       return words.some(function (w) { return n.indexOf(w) >= 0; });
     }).map(function (c) { return { item_id: c.item_id, name: c.name }; });
@@ -1001,7 +1005,7 @@ var Ops = (function () {
   H.catalog_edit = function (view, p, plan) {
     requireOwner(view);
     var it = view.item(p.item_id);
-    if (!it) throw opsError('UNKNOWN_ITEM', 'Нет такой позиции');
+    if (!it || it.status === 'deleted') throw opsError('UNKNOWN_ITEM', 'Нет такой позиции');
     var set = {};
     if (p.sale_price !== undefined) set.sale_price = posInt(p.sale_price, 'цена продажи');
     if (p.min_stock !== undefined) set.min_stock = nonNegInt(p.min_stock, 'минимальный остаток');
@@ -1011,6 +1015,22 @@ var Ops = (function () {
     if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
     update(plan, 'catalog', { item_id: it.item_id, client_id: plan.client_id }, it, set);
     plan.result = { item_id: it.item_id, set: set };
+  };
+
+  /**
+   * Удалить скрытую позицию (D38, только владелица). Запись не стирается: позиция получает статус «удалена»
+   * и пропадает из всех списков, а старые чеки, приходы и отчёты по ней остаются как были.
+   * Условия: позиция уже скрыта, остаток на складе нулевой (иначе деньги «потеряются»).
+   */
+  H.catalog_delete = function (view, p, plan) {
+    requireOwner(view);
+    var it = view.item(p.item_id);
+    if (!it || it.status === 'deleted') throw opsError('UNKNOWN_ITEM', 'Нет такой позиции');
+    if (it.status !== 'hidden') throw opsError('NOT_HIDDEN', 'Сначала скройте позицию из кассы — потом её можно удалить');
+    var qty = view.stock(it.item_id);
+    if (qty !== 0) throw opsError('HAS_STOCK', 'На складе ещё ' + qty + ' шт. Сначала спишите остаток (брак) или поправьте его при закрытии смены');
+    update(plan, 'catalog', { item_id: it.item_id, client_id: plan.client_id }, it, { status: 'deleted' });
+    plan.result = { item_id: it.item_id, name: it.name };
   };
 
   /**
@@ -1029,7 +1049,7 @@ var Ops = (function () {
     });
     if (lines.length > 200) throw opsError('BAD_INPUT', 'За один раз — не больше 200 позиций');
     var seen = {};
-    view.rows('catalog').forEach(function (c) { seen[String(c.name).toLowerCase()] = true; });
+    view.rows('catalog').forEach(function (c) { if (c.status !== 'deleted') seen[String(c.name).toLowerCase()] = true; });
     var dups = [];
     var anyQty = false;
     var rows = lines.map(function (l, k) {
@@ -1186,7 +1206,7 @@ var Ops = (function () {
     var paidBy = function (sid) { return sumWhere(n.cash_ops, function (o) { return o.staff_id === sid && (o.type === 'rate' || o.type === 'pct'); }); };
     var balance = {};
     view.balance().forEach(function (b) { balance[b.item_id] = b.qty; });
-    var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; });
+    var catalog = view.rows('catalog').filter(listed);
     return {
       shift_id: shiftId, shift_no: shift.shift_no, shift_date: shift.shift_date,
       florists: staff.map(function (s) { return (view.staff(s.staff_id) || {}).name || s.staff_id; }),

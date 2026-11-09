@@ -285,6 +285,34 @@ test('закупочная цена: меняется в карточке поз
   assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').cost, 650);
 });
 
+// ---------- удаление скрытой позиции (D38) ----------
+
+test('удаление скрытой позиции: только владелица, только скрытая и с нулевым остатком; история и отчёты целы', () => {
+  const { call, post, store, owner, seedPost } = shop();
+  assert.throws(() => post(777, 'catalog_delete', { item_id: 'old' }), { code: 'FORBIDDEN' }, 'флорист удалять не может');
+  assert.throws(() => post(1, 'catalog_delete', { item_id: 'rose' }), { code: 'NOT_HIDDEN' }, 'сначала нужно скрыть');
+  // скрытая, но с остатком — нельзя
+  seedPost(owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 4 }] });
+  post(1, 'catalog_edit', { item_id: 'rose', status: 'hidden' });
+  assert.throws(() => post(1, 'catalog_delete', { item_id: 'rose' }), { code: 'HAS_STOCK' });
+  assert.ok(call(1, { action: 'owner_catalog' }).some((c) => c.item_id === 'rose'), 'отказ ничего не удалил');
+});
+
+test('удалённая позиция пропадает отовсюду, но запись и движения остаются; имя можно занять заново', () => {
+  const { call, post, store } = shop();
+  post(1, 'catalog_delete', { item_id: 'old' }); // скрытая, остаток 0
+  assert.ok(!call(1, { action: 'owner_catalog' }).some((c) => c.item_id === 'old'), 'нет в каталоге владелицы');
+  assert.ok(!call(1, { action: 'bootstrap' }).catalog.some((c) => c.item_id === 'old'), 'нет в кассе');
+  assert.equal(store.tables.catalog.find((c) => c.item_id === 'old').status, 'deleted', 'строка в таблице осталась со статусом «удалена»');
+  assert.throws(() => post(1, 'catalog_edit', { item_id: 'old', status: 'active' }), { code: 'UNKNOWN_ITEM' }, 'вернуть нельзя');
+  assert.throws(() => post(1, 'catalog_delete', { item_id: 'old' }), { code: 'UNKNOWN_ITEM' }, 'второй раз — нет такой');
+  // то же имя можно завести заново без «похожих»
+  post(1, 'catalog_import', { category: 'greens', lines: [{ name: 'Гипсофила', sale_price: 350 }] });
+  const again = call(1, { action: 'owner_catalog' }).filter((c) => c.name === 'Гипсофила');
+  assert.equal(again.length, 1);
+  assert.equal(again[0].status, 'active');
+});
+
 // ---------- расходы месяца: несколько статей за раз ----------
 
 test('расходы месяца: аренда, интернет и налоги — одной операцией; ошибка пачки ничего не записывает', () => {

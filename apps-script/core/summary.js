@@ -160,7 +160,7 @@ var Summary = (function () {
   function stock(view) {
     var bal = {};
     view.balance().forEach(function (b) { bal[b.item_id] = b.qty; });
-    var items = view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; }).map(function (c) {
+    var items = view.rows('catalog').filter(function (c) { return c.status !== 'hidden' && c.status !== 'deleted'; }).map(function (c) {
       return { item_id: c.item_id, name: c.name, category: c.category, qty: bal[c.item_id] || 0, min: c.min_stock };
     });
     return {
@@ -234,7 +234,7 @@ var Summary = (function () {
     var bal = {};
     view.balance().forEach(function (b) { bal[b.item_id] = b.qty; });
     var out = [];
-    view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; }).forEach(function (c) {
+    view.rows('catalog').filter(function (c) { return c.status !== 'hidden' && c.status !== 'deleted'; }).forEach(function (c) {
       var stock = bal[c.item_id] || 0;
       var weekly = Math.max(0, sold[c.item_id] || 0);
       if (!(stock < c.min_stock || (weekly > 0 && stock < weekly))) return;

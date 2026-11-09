@@ -289,7 +289,7 @@ var ChatFlows = (function () {
       if (st.flow === 'catalog') {
         st.step = 'pick';
         deps.state.set(st);
-        var cat = view.rows('catalog').slice().sort(function (a, b) {
+        var cat = view.rows('catalog').filter(function (c) { return c.status !== 'deleted'; }).sort(function (a, b) {
           var ra = a.status === 'review' ? 0 : a.status === 'active' ? 1 : 2;
           var rb = b.status === 'review' ? 0 : b.status === 'active' ? 1 : 2;
           return ra - rb || (a.name < b.name ? -1 : 1);

@@ -53,7 +53,7 @@ var MiniApi = (function () {
         expenses: { delivery: rep.delivery, other: rep.other, withdrawal: rep.withdrawal, pay_adjust: rep.pay_adjust }
       };
     }
-    var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden'; }).map(function (c) {
+    var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden' && c.status !== 'deleted'; }).map(function (c) {
       return {
         item_id: c.item_id, name: c.name, category: c.category, price: c.sale_price,
         stock: view.stock(c.item_id), min: c.min_stock, review: c.status === 'review'
@@ -145,7 +145,7 @@ var MiniApi = (function () {
   // ---------- экраны владелицы (этап G) ----------
 
   var OWNER_KINDS = {
-    correction: true, anonymize: true, catalog_edit: true, new_item: true,
+    correction: true, anonymize: true, catalog_edit: true, catalog_delete: true, new_item: true,
     staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
     preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true, catalog_import: true
   };
@@ -316,7 +316,7 @@ var MiniApi = (function () {
   /** Весь каталог для владелицы: и скрытые позиции, с закупкой и остатком. */
   function ownerCatalog(store, staff, now) {
     var view = Ops.makeView(store, ctxOf(staff, now));
-    return view.rows('catalog').map(function (c) {
+    return view.rows('catalog').filter(function (c) { return c.status !== 'deleted'; }).map(function (c) {
       return { item_id: c.item_id, name: c.name, category: c.category, price: c.sale_price, cost: c.last_cost,
         min: c.min_stock, stock: view.stock(c.item_id), status: c.status };
     }).sort(function (a, b) { return a.category === b.category ? (a.name < b.name ? -1 : 1) : (a.category < b.category ? -1 : 1); });

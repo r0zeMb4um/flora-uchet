@@ -405,6 +405,12 @@ input[type="checkbox"] { accent-color: var(--rose); width: 18px; height: 18px; v
   background: rgba(255, 154, 154, .14); border: 1px solid rgba(255, 154, 154, .5); }
 .fielderr .error { font-size: 14px; font-weight: 600; }
 
+/* Кнопка «Назад» над экраном: видна на вложенных экранах, даже когда нижнее меню спрятано. */
+.backbar { position: sticky; top: 53px; z-index: 2; max-width: 560px; margin: 0 auto; padding: 10px 16px 0; }
+.backbar[hidden] { display: none; }
+.backbar__btn { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 14px 0 8px; font-weight: 600; }
+.backbar:not([hidden]) + .screen { padding-top: 8px; }
+
 /* Шапка — кнопка «на главную». */
 .top { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .top:active { opacity: .8; }

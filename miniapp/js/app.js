@@ -867,12 +867,54 @@
     function home() {
       if (!state.data) return;
       if (ownerUI()) { if (state.screen !== 'owner_today') openScreen('owner_today'); return; }
-      if (state.screen !== 'main') goMain();
+      if (state.screen !== 'main') { state.screen = 'main'; render(); } // шапка — всегда «на главную»; шаг назад — кнопка «Назад»
     }
     logo.addEventListener('click', home);
     logo.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); home(); } });
   })();
+  // ---------- «Назад»: на шаг, откуда пришли ----------
+  // Вкладки нижнего меню — корни: переход на них обнуляет «след». Вложенные экраны запоминают, откуда на них пришли,
+  // поэтому из «Ещё → Сотрудники → Анна» назад идём в «Сотрудники», а из «Склад → Принять товар» — в «Склад».
+  var ROOT_SCREENS = { main: 1, stock: 1, preorders: 1, more: 1, owner_today: 1, owner_history: 1, owner_period: 1, owner_catalog: 1, owner_manage: 1, sale: 1, close: 1 };
+  var BACK_LABEL = { main: 'Главная', stock: 'Склад', preorders: 'Заказы', more: 'Ещё', owner_today: 'Сегодня', owner_history: 'История',
+    owner_period: 'Сводка', owner_catalog: 'Склад', owner_manage: 'Ещё', owner_team: 'Сотрудники', owner_preorders: 'Предзаказы',
+    schedule: 'График смен', owner_debtors: 'Должники', owner_expenses: 'Расходы месяца' };
+  var trail = [];
+  var lastScreen = null;
+  function trackNav() {
+    var s = state.screen;
+    if (s === lastScreen) return;
+    var from = lastScreen;
+    lastScreen = s;
+    if (ROOT_SCREENS[s]) { trail = []; return; }
+    var i = trail.indexOf(s);
+    if (i >= 0) { trail = trail.slice(0, i); return; } // вернулись назад
+    if (from) trail.push(from);
+  }
+  /** Куда ведёт «Назад» с текущего экрана; null — это вкладка, назад некуда. */
+  function backTarget() {
+    var s = state.screen;
+    if (ROOT_SCREENS[s]) return null;
+    var t = trail.length ? trail[trail.length - 1] : (ownerUI() ? OWNER_BACK[s] : FLORIST_BACK[s]) || NAV_OF[s];
+    return t && t !== s ? t : null;
+  }
+  function renderBackBar() {
+    var bar = document.getElementById('backbar');
+    if (!bar) {
+      bar = el('div', { id: 'backbar', class: 'backbar', hidden: true });
+      app.parentNode.insertBefore(bar, app);
+    }
+    var t = state.data ? backTarget() : null;
+    if (!t) { bar.hidden = true; bar.replaceChildren(); return; }
+    var name = BACK_LABEL[t];
+    bar.replaceChildren(el('button', { class: 'chip backbar__btn', type: 'button', 'aria-label': 'Назад' + (name ? ' в «' + name + '»' : ''),
+      onclick: function () { goMain(); } }, [icon('chevron-left'), 'Назад' + (name ? ' · ' + name : '')]));
+    bar.hidden = false;
+  }
+
   function goMain() {
+    var back = backTarget();
+    if (back) { openScreen(back); return; }
     // Владелица возвращается в свои разделы, флорист — на главную кассы.
     if (ownerUI()) {
       openScreen(OWNER_BACK[state.screen] || (state.screen === 'owner_shift' ? 'owner_history' : state.screen === 'owner_manage' ? 'owner_today' : 'owner_today'));
@@ -973,11 +1015,13 @@
 
   function renderNow() {
     if (!state.data) return;
+    trackNav();
     if (state.screen === 'sale') renderSale();
     else if (state.screen === 'close') renderClose();
     else if (SCREENS[state.screen]) SCREENS[state.screen]();
     else renderMain();
     renderNav();
+    renderBackBar();
     updateNet();
     renderModeSwitch();
     // Экран продажи — спокойный: без анимаций и чуть мельче шрифт.
@@ -2845,7 +2889,13 @@
       el('button', { class: 'btn', disabled: state.sending, onclick: function () {
         submitOp('catalog_edit', { item_id: it.item_id, status: hidden ? 'active' : 'hidden' }, hidden ? 'Позиция снова в кассе' : 'Позиция скрыта', function () { openScreen('owner_catalog'); });
       } }, [icon(hidden ? 'eye' : 'eye-off'), hidden ? 'Вернуть в кассу' : 'Скрыть из кассы']),
-      el('div', { class: 'muted center', text: hidden ? 'Скрытая позиция не продаётся, история чеков сохраняется.' : 'Скрыть можно, если позиции больше нет. История чеков сохраняется.' })
+      el('div', { class: 'muted center', text: hidden ? 'Скрытая позиция не продаётся, история чеков сохраняется.' : 'Скрыть можно, если позиции больше нет. История чеков сохраняется.' }),
+      hidden ? el('button', { class: 'btn btn--close', disabled: state.sending || it.stock !== 0, onclick: function () {
+        askOk('Удалить «' + it.name + '» из каталога? Из списков она пропадёт, старые чеки и отчёты останутся.', function () {
+          submitOp('catalog_delete', { item_id: it.item_id }, 'Позиция удалена', function () { openScreen('owner_catalog'); });
+        });
+      } }, [icon('trash'), 'Удалить навсегда']) : null,
+      hidden && it.stock !== 0 ? el('div', { class: 'muted center', text: 'Удалить можно, когда остаток равен нулю (сейчас ' + it.stock + ' шт.). Спишите остаток браком или поправьте при закрытии смены.' }) : null
     );
   };
 
