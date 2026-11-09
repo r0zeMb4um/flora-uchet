@@ -68,3 +68,55 @@ function correctReceipt() {
   Webhook.notify(store, CLIENT_ID, res.notify);
   Logger.log('Исправлено. Владелице отправлен пересчитанный отчёт смены №' + SHIFT_NO + '.');
 }
+
+/**
+ * ЧИСТКА ТЕСТОВЫХ ДАННЫХ (D35). Запускается ВРУЧНУЮ из редактора один раз перед боевым стартом.
+ * Остаются: клиент, точка, настройки, владелица (с её приглашениями). Очищается всё остальное: каталог, покупатели, смены,
+ * чеки, склад, расходы, график, флористы, журнал. Перед чисткой на Диск кладётся полная копия таблицы.
+ * Сначала запустите с CONFIRM = false: функция только покажет, сколько строк будет удалено. Потом CONFIRM = true.
+ */
+function resetTestData() {
+  var CONFIRM = false;           // ← true — очистить по-настоящему
+  var store = SheetsStore.open();
+  var ss = store.spreadsheet;
+  var plan = Maintenance.planReset({
+    staff: store.rows('staff'), invites: store.rows('invites'), ops_log: store.rows('ops_log'),
+    clients: store.rows('clients'), points: store.rows('points'), settings: store.rows('settings')
+  });
+  var report = [];
+  plan.wipeSheets.forEach(function (n) { report.push(n + ': ' + store.rows(n).length + ' строк'); });
+  report.push('staff: останется владельцев ' + plan.keepStaff.length + ' из ' + store.rows('staff').length);
+  report.push('invites: останется ' + plan.keepInvites.length + ' из ' + store.rows('invites').length);
+  report.push('ops_log: останется ' + plan.keepOps.length + ' из ' + store.rows('ops_log').length);
+  Logger.log('Будет очищено:\n' + report.join('\n'));
+  if (!CONFIRM) { Logger.log('Пока ничего не удалено. Чтобы очистить, поставьте CONFIRM = true и запустите снова.'); return; }
+
+  // 1. Копия «до чистки» — имя не подходит под ночное удаление старых копий, поэтому лежит, пока вы её не уберёте сами.
+  var folders = DriveApp.getFoldersByName(BACKUP_FOLDER);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(BACKUP_FOLDER);
+  var copy = DriveApp.getFileById(ss.getId()).makeCopy('Флора·Учёт — ДО ЧИСТКИ ' + nowIso().replace('T', ' ').slice(0, 16), folder);
+  Logger.log('Копия до чистки: ' + copy.getUrl());
+
+  var keepRows = function (name, rows) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var headers = Schema.headers(name);
+    var last = sh.getLastRow();
+    if (last >= 2) sh.getRange(2, 1, last - 1, Math.max(sh.getLastColumn(), headers.length)).clearContent();
+    if (rows.length) {
+      var values = rows.map(function (r) { return headers.map(function (h) { return r[h] === undefined || r[h] === null ? '' : r[h]; }); });
+      sh.getRange(2, 1, values.length, headers.length).setValues(values);
+    }
+  };
+  plan.wipeSheets.forEach(function (n) { keepRows(n, []); });
+  keepRows('staff', plan.keepStaff.map(function (r) { delete r._row; return r; }));
+  keepRows('invites', plan.keepInvites);
+  keepRows('ops_log', plan.keepOps);
+  SpreadsheetApp.flush();
+
+  // 2. Служебные счётчики (напоминания, замеры скорости) — заново.
+  var props = PropertiesService.getScriptProperties();
+  Object.keys(props.getProperties()).forEach(function (k) { if (k.indexOf('REMINDED_') === 0 || k.indexOf('PERF_') === 0) props.deleteProperty(k); });
+  props.setProperty('DATA_VERSION', String(Date.now()));
+  Logger.log('ГОТОВО. Осталась владелица и настройки. Дальше: приглашайте флористов («Управление» → «Сотрудники») и загружайте каталог.');
+}

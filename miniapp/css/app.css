@@ -449,3 +449,39 @@ body.on-sale #app .input, body.on-sale #app .search { font-size: 14px; }
 .sch__who { font-size: 10px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; max-width: 100%; white-space: nowrap; opacity: .9; }
 
 .modeswitch { margin-left: auto; font-size: 13px; padding: 6px 12px; }
+
+/* Таблица-черновик каталога */
+.dr { background: var(--glass); border: 1px solid rgba(255, 255, 255, .14); border-radius: 14px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dr--bad { border-color: #ffb3b3; }
+.dr__top { display: flex; gap: 6px; align-items: center; }
+.dr__top .input { flex: 1; min-width: 0; }
+.dr__x { flex: none; width: 40px; height: 40px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .18); background: transparent; color: inherit; }
+.dr__nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dr__f { display: flex; flex-direction: column; gap: 2px; font-size: 11px; opacity: .95; }
+.dr__f .input { padding: 8px; min-width: 0; text-align: right; }
+.dr__note { font-size: 12px; min-height: 0; color: #ffb3b3; }
+.dr__note:empty { display: none; }
+
+/* Лёгкий вид: без размытия стекла, лепестков и анимаций — быстрее на слабых телефонах */
+body.lite *, body.lite *::before, body.lite *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; animation: none !important; transition: none !important; }
+body.lite .petals { display: none; }
+body.lite::before { background: linear-gradient(160deg, var(--bg-deep) 0%, var(--bg-mid) 55%, var(--bg-light) 100%); }
+body.lite .card, body.lite .tile, body.lite .btn, body.lite .chip, body.lite .search, body.lite .input, body.lite .top, body.lite .nav { background: var(--glass-strong, rgba(36, 84, 93, .9)); }
+
+/* Таблица-черновик каталога */
+.dr { background: var(--glass); border: 1px solid rgba(255, 255, 255, .14); border-radius: 14px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dr--bad { border-color: #ffb3b3; }
+.dr__top { display: flex; gap: 6px; align-items: center; }
+.dr__top .input { flex: 1; min-width: 0; }
+.dr__x { flex: none; width: 40px; height: 40px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .18); background: transparent; color: inherit; }
+.dr__nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dr__f { display: flex; flex-direction: column; gap: 2px; font-size: 11px; opacity: .95; }
+.dr__f .input { padding: 8px; min-width: 0; text-align: right; }
+.dr__note { font-size: 12px; min-height: 0; color: #ffb3b3; }
+.dr__note:empty { display: none; }
+
+/* Лёгкий вид: без размытия стекла, лепестков и анимаций — быстрее на слабых телефонах */
+body.lite *, body.lite *::before, body.lite *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; animation: none !important; transition: none !important; }
+body.lite .petals { display: none; }
+body.lite::before { background: linear-gradient(160deg, var(--bg-deep) 0%, var(--bg-mid) 55%, var(--bg-light) 100%); }
+body.lite .card, body.lite .tile, body.lite .btn, body.lite .chip, body.lite .search, body.lite .input, body.lite .top, body.lite .nav { background: var(--glass-strong, rgba(36, 84, 93, .9)); }

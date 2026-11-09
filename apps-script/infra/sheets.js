@@ -16,6 +16,13 @@ var SheetsStore = (function () {
 
   function create(ss) {
     var memo = {};
+    var dirty = false;
+    var inLock = false;
+    /** Версия данных: меняется при любой записи. По ней сервер понимает, что кэш чтения устарел (D36). */
+    function bump() {
+      try { PropertiesService.getScriptProperties().setProperty('DATA_VERSION', String(Date.now()) + '-' + Math.floor(Math.random() * 1e6)); } catch (e) { /* без версии кэш просто живёт недолго */ }
+    }
+    function touched() { if (inLock) dirty = true; else bump(); }
 
     var checked = {};
     /** Новая колонка в конце схемы появляется и в уже созданном листе (читаем по позициям, поэтому данные не сдвигаются). */
@@ -110,6 +117,7 @@ var SheetsStore = (function () {
         var sh = sheetOf(name);
         var start = sh.getLastRow() + 1;
         sh.getRange(start, 1, values.length, headers.length).setValues(values);
+        touched();
         var cached = load(name);
         rows.forEach(function (r, i) {
           var o = { _row: start + i };
@@ -125,6 +133,7 @@ var SheetsStore = (function () {
           if (!matches(r, match)) return;
           Object.keys(set).forEach(function (k) { r[k] = set[k]; });
           sh.getRange(r._row, 1, 1, headers.length).setValues([headers.map(function (h) { return toCell(r[h]); })]);
+          touched();
         });
       },
       withLock: function (fn) {
@@ -135,9 +144,13 @@ var SheetsStore = (function () {
           throw e;
         }
         try {
+          inLock = true;
+          dirty = false;
           memo = {}; // под блокировкой читаем свежие данные
           return fn();
         } finally {
+          inLock = false;
+          if (dirty) bump(); // версия меняется ДО снятия блокировки: читатели не увидят старый кэш после записи
           SpreadsheetApp.flush();
           lock.releaseLock();
         }

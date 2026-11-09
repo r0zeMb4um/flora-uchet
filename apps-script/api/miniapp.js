@@ -398,12 +398,49 @@ var MiniApi = (function () {
     throw apiError('BAD_ACTION', 'Неизвестное действие');
   }
 
+  // ---------- кэш чтения (D36): таблица не читается, если с прошлого раза ничего не записывали ----------
+
+  var READ_CACHED = { bootstrap: 1, schedule: 1, receipts: 1, owner_today: 1, owner_shifts: 1, owner_shift: 1, owner_period: 1,
+    owner_customers: 1, owner_catalog: 1, owner_team: 1, owner_expenses: 1, owner_settings: 1 };
+  var CACHE_TTL = 300; // секунд: страховка на случай записи в обход блокировки и смены даты
+  var CACHE_MAX = 90000; // предел одной записи в кэше Google — 100 КБ
+
+  /** Ключ кэша: версия данных + кто спрашивает + что спрашивает (параметры, влияющие на ответ). */
+  function cacheKey(version, telegramId, data) {
+    var p = {};
+    ['month', 'from', 'to', 'shift_id', 'limit', 'days'].forEach(function (k) { if (data[k] !== undefined) p[k] = data[k]; });
+    return 'r|' + version + '|' + telegramId + '|' + data.action + '|' + JSON.stringify(p);
+  }
+
+  /** Достать из кэша или посчитать и положить. cache — { get(key), put(key, text, seconds) }. */
+  function readThrough(cache, key, compute) {
+    var hit = cache.get(key);
+    if (hit) { try { return { value: JSON.parse(hit), cached: true }; } catch (ignore) { /* битая запись — считаем заново */ } }
+    var value = compute();
+    try {
+      var text = JSON.stringify(value);
+      if (text.length < CACHE_MAX) cache.put(key, text, CACHE_TTL);
+    } catch (ignore2) { /* кэш не обязателен */ }
+    return { value: value, cached: false };
+  }
+
   /** Вход из doPost (Apps Script). */
   function handle(data) {
     var store = null;
     var t0 = Date.now();
     try {
       var auth = Auth.verifyGas(data.initData);
+      if (READ_CACHED[data.action] && typeof CacheService !== 'undefined') {
+        var props = PropertiesService.getScriptProperties();
+        var gcache = CacheService.getScriptCache();
+        var key = cacheKey(props.getProperty('DATA_VERSION') || '0', auth.user.id, data);
+        var got = readThrough(gcache, key, function () {
+          store = SheetsStore.open();
+          return dispatch(store, auth.user.id, data, nowIso()).data;
+        });
+        if (typeof recordPerf_ === 'function') recordPerf_(Date.now() - t0);
+        return jsonOut_({ ok: true, data: got.value });
+      }
       store = SheetsStore.open();
       var out = dispatch(store, auth.user.id, data, nowIso());
       if (out.export) {
@@ -428,7 +465,7 @@ var MiniApi = (function () {
     }
   }
 
-  return { handle: handle, dispatch: dispatch, bootstrap: bootstrap };
+  return { handle: handle, dispatch: dispatch, bootstrap: bootstrap, cacheKey: cacheKey, readThrough: readThrough };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = MiniApi;

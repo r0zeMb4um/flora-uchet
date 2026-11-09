@@ -1020,9 +1020,14 @@ var Ops = (function () {
    */
   H.catalog_import = function (view, p, plan) {
     requireOwner(view);
-    var lines = list(p.lines, 'позиции');
+    // Либо один список с категорией (category + lines), либо несколько групп (groups: [{ category, lines }]).
+    var groups = Array.isArray(p.groups) ? p.groups : [{ category: p.category, lines: p.lines }];
+    var lines = [];
+    groups.forEach(function (g) {
+      var cat = oneOf(g.category, CATEGORIES, 'категория');
+      list(g.lines, 'позиции').forEach(function (l) { lines.push(Object.assign({}, l, { _cat: cat })); });
+    });
     if (lines.length > 200) throw opsError('BAD_INPUT', 'За один раз — не больше 200 позиций');
-    var category = oneOf(p.category, CATEGORIES, 'категория');
     var seen = {};
     view.rows('catalog').forEach(function (c) { seen[String(c.name).toLowerCase()] = true; });
     var dups = [];
@@ -1035,7 +1040,7 @@ var Ops = (function () {
       var qty = l.qty === undefined || l.qty === '' ? 0 : nonNegInt(l.qty, 'остаток');
       if (qty > 0) anyQty = true;
       return {
-        k: k, name: name, sale_price: posInt(l.sale_price, 'цена продажи'),
+        k: k, cat: l._cat, name: name, sale_price: posInt(l.sale_price, 'цена продажи'),
         min_stock: l.min_stock === undefined || l.min_stock === '' ? 0 : nonNegInt(l.min_stock, 'минимальный остаток'),
         qty: qty, cost: l.cost === undefined || l.cost === '' ? 0 : nonNegInt(l.cost, 'закупка за штуку')
       };
@@ -1047,7 +1052,7 @@ var Ops = (function () {
     rows.forEach(function (r) {
       var id = 'i-' + plan.op_id + '-' + r.k;
       add(plan, view, 'catalog', {
-        item_id: id, code: '', category: category, name: r.name, unit: 'шт', sale_price: r.sale_price,
+        item_id: id, code: '', category: r.cat, name: r.name, unit: 'шт', sale_price: r.sale_price,
         last_cost: r.cost, min_stock: r.min_stock, status: 'active', created_by: view.ctx.staff_id
       });
       if (r.qty > 0) {

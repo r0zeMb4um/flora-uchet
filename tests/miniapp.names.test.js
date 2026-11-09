@@ -13,3 +13,14 @@ test('функции, которые вызывает касса, объявле
   const lost = must.filter((n) => !declared.has(n));
   assert.deepStrictEqual(lost, []);
 });
+
+test('все экраны кассы на месте (защита от случайной потери блока при правках)', () => {
+  const screens = ['stock', 'more', 'income', 'defect', 'refund', 'cancel', 'cashout', 'withdraw', 'repay', 'preorders', 'schedule', 'owner_day', 'open',
+    'owner_today', 'owner_shift', 'owner_period', 'owner_debtors', 'owner_manage', 'owner_catalog', 'owner_typical', 'owner_item', 'owner_item_new', 'owner_import',
+    'owner_team', 'owner_staff', 'owner_staff_new', 'owner_invite', 'owner_expenses', 'owner_settings', 'owner_work', 'owner_start_stock', 'owner_start_debt',
+    'owner_preorders', 'owner_preorder'];
+  const lost = screens.filter((n) => !new RegExp('SCREENS(_EARLY)?\.' + n + ' = function').test(src));
+  assert.deepEqual(lost, []);
+  const helpers = ['positionsWord', 'parseImport', 'dayLabel', 'pctBp', 'signedInt', 'liteToggle', 'prefetchOwner', 'draftGet', 'askOk', 'formField', 'ocRead', 'drawCatalogAdd'];
+  assert.deepEqual(helpers.filter((n) => !declared.has(n)), []);
+});

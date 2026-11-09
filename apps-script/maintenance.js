@@ -66,7 +66,27 @@ var Maintenance = (function () {
     return L.join('\n');
   }
 
-  return { shouldRemind: shouldRemind, reminderKey: reminderKey, backupsToDelete: backupsToDelete, fillRatio: fillRatio,
+  /**
+   * Чистка тестовых данных (D35): остаются клиент, точка, настройки и ВЛАДЕЛИЦА (с её приглашениями).
+   * Всё остальное — каталог, покупатели, смены, чеки, склад, расходы, график, сотрудники-флористы, журнал — очищается.
+   * data: { staff, invites, ops_log, clients, points, settings } — строки листов. Возвращает, что оставить.
+   */
+  function planReset(data) {
+    var keepStaff = (data.staff || []).filter(function (s) { return s.role === 'owner'; });
+    var ownerIds = {};
+    keepStaff.forEach(function (s) { ownerIds[s.staff_id] = true; });
+    var keepInvites = (data.invites || []).filter(function (i) { return ownerIds[i.staff_id]; });
+    var keepOps = { seed: true };
+    [data.clients, data.points, data.settings, keepStaff, keepInvites].forEach(function (rows) {
+      (rows || []).forEach(function (r) { if (r.op_id) keepOps[r.op_id] = true; });
+    });
+    var ops = (data.ops_log || []).filter(function (o) { return keepOps[o.op_id]; });
+    return { keepStaff: keepStaff, keepInvites: keepInvites, keepOps: ops,
+      wipeSheets: ['catalog', 'customers', 'shifts', 'shift_staff', 'receipts', 'reservations', 'payments', 'debt_moves', 'stock_moves',
+        'stock_balance', 'cash_ops', 'owner_expenses', 'bouquet_templates', 'schedule', 'audit'] };
+  }
+
+  return { planReset: planReset, shouldRemind: shouldRemind, reminderKey: reminderKey, backupsToDelete: backupsToDelete, fillRatio: fillRatio,
     weekKey: weekKey, digestProblems: digestProblems, digestText: digestText };
 })();
 
@@ -77,6 +97,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Maintenanc
 var BACKUP_FOLDER = 'Флора·Учёт — резервные копии';
 var BACKUP_KEEP_DAYS = 30;
 
+/** Прогрев (D36): в рабочие часы раз в 5 минут «стучимся» в собственный адрес, чтобы скрипт не засыпал и кассу не ждали 5–7 секунд после паузы. */
+function keepWarm() {
+  var hour = Number(nowIso().slice(11, 13));
+  if (hour < 8 || hour > 23) return;
+  try { UrlFetchApp.fetch('https://script.google.com/macros/s/' + DEPLOYMENT_ID + '/exec?ping=' + Date.now(), { muteHttpExceptions: true, followRedirects: true }); } catch (e) { /* не страшно */ }
+}
+
 /** Поставить все триггеры заново (старые удаляются). Запустить один раз из редактора. */
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
@@ -85,6 +112,7 @@ function installTriggers() {
   ScriptApp.newTrigger('healthCheck').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Almaty').create();
   ScriptApp.newTrigger('pickupsToday').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Almaty').create();
   ScriptApp.newTrigger('pickupsTomorrow').timeBased().atHour(18).everyDays(1).inTimezone('Asia/Almaty').create();
+  ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('weeklyDigest').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).inTimezone('Asia/Almaty').create();
   Logger.log('Триггеры поставлены: напоминание о смене каждые 15 минут; копия и проверки в 03:00; проверка бота, утро владелицы и выдачи на сегодня в 09:00; выдачи на завтра в 18:00; недельный отчёт администратору по понедельникам.');
   nightly(); // сразу проверить, что всё работает (первая копия появится на Диске)

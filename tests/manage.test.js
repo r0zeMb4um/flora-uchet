@@ -303,3 +303,16 @@ test('расходы месяца: аренда, интернет и налог�
   post(1, 'owner_expense', { month: '2026-11', item: 'Вода', amount: 700 }); // старый формат (одна статья) работает по-прежнему
   assert.equal(call(1, { action: 'owner_expenses', month: '2026-11' }).total, 171700);
 });
+
+test('загрузка каталога: несколько категорий одной операцией (groups); ошибка в одной группе ничего не записывает', () => {
+  const { call, post } = shop();
+  post(1, 'catalog_import', { groups: [
+    { category: 'flowers', lines: [{ name: 'Пион', sale_price: 1500, qty: 10 }] },
+    { category: 'packaging', lines: [{ name: 'Лента', sale_price: 200 }, { name: 'Крафт', sale_price: 300, qty: 50, cost: 100 }] }
+  ] });
+  const cat = call(1, { action: 'owner_catalog' });
+  assert.deepEqual(['Пион', 'Лента', 'Крафт'].map((n) => cat.find((c) => c.name === n).category), ['flowers', 'packaging', 'packaging']);
+  assert.throws(() => post(1, 'catalog_import', { groups: [
+    { category: 'flowers', lines: [{ name: 'Тюльпан', sale_price: 400 }] }, { category: 'вещи', lines: [{ name: 'Z', sale_price: 1 }] }] }), { code: 'BAD_INPUT' });
+  assert.ok(!call(1, { action: 'owner_catalog' }).some((c) => c.name === 'Тюльпан'), 'тюльпан не записался: пачка целиком отклонена');
+});

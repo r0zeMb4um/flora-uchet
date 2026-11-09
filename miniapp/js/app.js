@@ -19,11 +19,29 @@
   var CATS = { flowers: 'Цветы', greens: 'Зелень', toys: 'Игрушки', baskets: 'Корзины', packaging: 'Упаковка' };
   var LAST_KEY = 'flora.last.v1';
   var QUEUE_KEY = 'flora.queue.v1'; // продажи, ещё не принятые сервером
+  var OC_KEY = 'flora.oc.v1'; // последние данные экранов владелицы — открываются мгновенно, обновляются в фоне
+  var LITE_KEY = 'flora.lite';
   var CACHE_KEY = 'flora.cache.v1'; // последние данные кассы (каталог, остатки) — касса открывается мгновенно
   var LARGE_SUM = 50000; // с этой суммы «Провести» просит подтвердить
   var CAT_ICON = { flowers: 'flower', greens: 'leaf', toys: 'gift', baskets: 'basket', packaging: 'package' };
 
   /** Интерфейс владелицы (кабинет), а не режим смены: владелица, вышедшая в смену, видит экраны флориста. */
+  /** Лёгкий вид: без размытия стекла, лепестков и анимаций. Включается сам на слабых телефонах или вручную. */
+  function liteOn() {
+    var v = null;
+    try { v = localStorage.getItem('flora.lite'); } catch (e) { /* нет хранилища */ }
+    if (v === '1') return true;
+    if (v === '0') return false;
+    return (navigator.deviceMemory || 8) <= 2; // сам включается только на совсем слабых телефонах; остальным — кнопка в «Ещё»
+  }
+  function applyLite() { document.body.classList.toggle('lite', liteOn()); }
+  function liteToggle() {
+    return el('button', { class: 'btn', onclick: function () {
+      try { localStorage.setItem('flora.lite', liteOn() ? '0' : '1'); } catch (e) { /* ничего */ }
+      applyLite(); render();
+    } }, [icon('bolt'), liteOn() ? 'Лёгкий вид включён · вернуть красивый' : 'Включить лёгкий вид (быстрее на слабом телефоне)']);
+  }
+
   function ownerUI(d) { var x = d || state.data; return !!x && x.me.role === 'owner' && state.mode !== 'shift'; }
   var state = { mode: 'owner', data: null, screen: 'main', sending: false, cat: 'all', query: '', draft: null, mb: false,
     offline: typeof navigator !== 'undefined' && navigator.onLine === false, fromCache: false, fieldError: null };
@@ -525,9 +543,9 @@
   function uid() { try { return String(tg.initDataUnsafe.user.id); } catch (e) { return ''; } }
   function readCache() {
     var c = store(CACHE_KEY);
-    return c && c.uid === uid() && c.data && c.data.me && c.data.me.role === 'florist' && Date.now() - c.at < 36 * 3600000 ? c : null;
+    return c && c.uid === uid() && c.data && c.data.me && Date.now() - c.at < 36 * 3600000 ? c : null;
   }
-  function writeCache(d) { if (d && d.me && d.me.role === 'florist') store(CACHE_KEY, { uid: uid(), at: Date.now(), data: d }); }
+  function writeCache(d) { if (d && d.me) store(CACHE_KEY, { uid: uid(), at: Date.now(), data: d }); }
   /** Данные пришли с сервера (fromServer) или из кэша. В кэш кладём «чистые» данные — до вычета очереди. */
   function setData(d, fromServer) {
     if (fromServer) { writeCache(d); state.fromCache = false; state.cacheAt = Date.now(); }
@@ -709,7 +727,7 @@
     return api({ action: 'bootstrap' }).then(function (data) {
       setData(data, true);
       // Ссылка «Закрыть смену в кассе» из чата (передача смены) открывает сразу закрытие.
-      if (ownerUI(data)) { openScreen('owner_today'); return; }
+      if (ownerUI(data)) { if (state.screen === 'main') openScreen('owner_today'); prefetchOwner(); return; }
       if (location.hash === '#close' && data.shift && data.shift.on_shift) { history.replaceState(null, '', location.pathname); openClose(); return; }
       render();
       pump();
@@ -870,15 +888,15 @@
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
     cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more', open: 'main',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
-    owner_period: 'owner_period', owner_debtors: 'owner_debtors',
-    owner_manage: 'owner_manage', owner_catalog: 'owner_manage', owner_item: 'owner_manage', owner_item_new: 'owner_manage',
+    owner_period: 'owner_period', owner_debtors: 'owner_period',
+    owner_manage: 'owner_manage', owner_catalog: 'owner_catalog', owner_item: 'owner_catalog', owner_item_new: 'owner_catalog',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_manage'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_catalog', owner_typical: 'owner_catalog'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
-    owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_catalog: 'owner_manage',
+    owner_item: 'owner_catalog', owner_item_new: 'owner_catalog', owner_typical: 'owner_catalog', owner_debtors: 'owner_period',
     owner_team: 'owner_manage', owner_staff: 'owner_team', owner_staff_new: 'owner_team', owner_invite: 'owner_team',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_preorders',
     owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', owner_day: 'schedule', schedule: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_catalog'
@@ -898,7 +916,7 @@
     };
     var items = isOwner
       ? [item('owner_today', 'home', 'Сегодня'), item('owner_history', 'history', 'История'),
-        item('owner_period', 'chart-line', 'Сводка'), item('owner_debtors', 'users', 'Должники'), item('owner_manage', 'settings', 'Управление')]
+        item('owner_period', 'chart-line', 'Сводка'), item('owner_catalog', 'box', 'Склад'), item('owner_manage', 'dots', 'Ещё')]
       : [item('main', 'home', 'Главная'), item('stock', 'box', 'Склад'),
         el('button', { class: 'nav__plus', 'aria-label': 'Новая продажа', onclick: function () { state.screen = 'sale'; render(); } }, [icon('plus')]),
         item('preorders', 'calendar-heart', 'Заказы'), item('more', 'dots', 'Ещё')];
@@ -1035,22 +1053,26 @@
     backButton(false);
     mainButton(null);
     var go = function (screen) { return function () { openScreen(screen); }; };
+    var head = function (t) { return el('div', { class: 'script', style: 'font-size:22px;margin-top:6px', text: t }); };
     app.replaceChildren(
       el('h1', { class: 'h1', text: 'Ещё' }),
+      head('Чеки и деньги'),
       el('div', { class: 'grid2' }, [
-        el('button', { class: 'btn btn--tile', onclick: go('income') }, [icon('truck-delivery'), 'Приход']),
-        el('button', { class: 'btn btn--tile', onclick: go('defect') }, [icon('flower-off'), 'Брак']),
         el('button', { class: 'btn btn--tile', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат']),
         el('button', { class: 'btn btn--tile', onclick: go('cancel') }, [icon('receipt-off'), 'Отмена продажи']),
         el('button', { class: 'btn btn--tile', onclick: go('cashout') }, [icon('cash-banknote'), 'Расход']),
         el('button', { class: 'btn btn--tile', onclick: go('repay') }, [icon('coin'), 'Погашение долга']),
-        el('button', { class: 'btn btn--tile', onclick: go('schedule') }, [icon('calendar-event'), 'График смен']),
-        el('button', { class: 'btn btn--tile', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала'])
+        el('button', { class: 'btn btn--tile btn--wide', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала из кассы'])
       ]),
+      head('Смена'),
+      el('div', { class: 'grid2' }, [
+        el('button', { class: 'btn btn--tile', onclick: go('schedule') }, [icon('calendar-event'), 'График смен']),
+        el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('truck-delivery'), 'Приход и брак'])
+      ]),
+      liteToggle(),
       el('div', { class: 'more-end' }, [
         el('button', { class: 'btn btn--close', onclick: function () { openClose(); } }, [icon('lock'), 'Закрыть смену'])
-      ]),
-      null);
+      ]));
   };
 
   function renderSale() {
@@ -1599,6 +1621,7 @@
     busy(postOp(kind, payload, f.op_id)).then(function (res) {
       if (!res) return;
       haptic('success');
+      ocClear();
       setData(res.state, true);
       toast((res.status === 'already' ? 'Уже было проведено. ' : '') + okText);
       if (next) next(res); else { state.screen = 'main'; render(); }
@@ -1864,8 +1887,13 @@
     var list = state.data.catalog.filter(function (c) {
       return (cat === 'all' || c.category === cat) && (!q || c.name.toLowerCase().indexOf(q) >= 0);
     }).sort(function (a, b) { return ((b.stock < b.min) - (a.stock < a.min)) || (a.name < b.name ? -1 : 1); });
+    var onShift = !!(state.data.shift && state.data.shift.on_shift);
     app.replaceChildren(title('Склад'),
-      el('input', { class: 'search', type: 'search', placeholder: 'Поиск', value: f.q || '', oninput: function (e) { f.q = e.target.value; SCREENS.stock(); var s = app.querySelector('.search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }),
+      onShift ? el('div', { class: 'row' }, [
+        el('button', { class: 'btn btn--primary', onclick: function () { openScreen('income'); } }, [icon('truck-delivery'), 'Принять товар']),
+        el('button', { class: 'btn', onclick: function () { openScreen('defect'); } }, [icon('flower-off'), 'Списать брак'])
+      ]) : null,
+      el('input', { class: 'search', type: 'search', placeholder: 'Поиск', value: f.q || '', oninput: function (e) { f.q = e.target.value; render(); } }),
       chips([['all', 'Все']].concat(Object.keys(CATS).map(function (k) { return [k, CATS[k]]; })), cat, function (k) { f.cat = k; render(); }),
       el('div', { class: 'card' }, list.map(function (c) {
         var low = c.stock < c.min;
@@ -1873,7 +1901,8 @@
           itemArt(c),
           el('div', { class: 'item__main' }, [el('div', { style: 'font-weight:600', text: c.name }),
             el('div', { class: 'muted num', style: 'font-size:13px', text: money(c.price) + ' · ' + c.stock + ' шт' + (c.review ? ' · на проверке' : '') })]),
-          el('span', { class: 'status ' + (low ? 'status--low' : 'status--ok'), text: low ? 'Мало · мин. ' + c.min : 'Есть' })
+          el('span', { class: 'status ' + (low ? 'status--low' : 'status--ok'), text: low ? 'Мало · мин. ' + c.min : 'Есть' }),
+          onShift ? el('button', { class: 'chip', 'aria-label': 'Принять ' + c.name, onclick: function () { openScreen('income', { lines: [{ item_id: c.item_id, qty: '', cost: '' }] }); } }, ['+']) : null
         ]);
       })));
   };
@@ -2032,7 +2061,7 @@
 
   // ---------- владелица: Сегодня, История, Сводка, Должники ----------
 
-  var OWNER_TABS = [['owner_today', 'Сегодня'], ['owner_history', 'История'], ['owner_period', 'Сводка'], ['owner_debtors', 'Должники'], ['owner_manage', 'Управление']];
+  var OWNER_TABS = [['owner_today', 'Сегодня'], ['owner_history', 'История'], ['owner_period', 'Сводка'], ['owner_debtors', 'Должники'], ['owner_catalog', 'Склад'], ['owner_manage', 'Ещё']];
 
   function ownerTabs() {
     var cur = state.screen === 'owner_shift' ? 'owner_history' : state.screen;
@@ -2050,16 +2079,57 @@
     return box;
   }
   /** Загрузить данные экрана владелицы один раз, потом перерисовать. */
+  // Данные экранов владелицы: в памяти и на телефоне. Открываем из них сразу, свежие подтягиваем в фоне (D36).
+  function ocRead(key) {
+    var c = store(OC_KEY);
+    return c && c.uid === uid() && c.m ? c.m[key] : undefined;
+  }
+  function ocWrite(key, value) {
+    var c = store(OC_KEY);
+    var m = c && c.uid === uid() && c.m ? c.m : {};
+    m[key] = value;
+    var keys = Object.keys(m);
+    if (keys.length > 14) delete m[keys[0]];
+    store(OC_KEY, { uid: uid(), m: m });
+  }
+  function ocClear() { store(OC_KEY, null); }
+
   function ownerLoad(action, params, draw) {
     var f = state.form;
     if (f.data === undefined) {
+      var okey = action + '|' + JSON.stringify(params || {});
+      var seen = ocRead(okey);
+      var fetchFresh = function () {
+        return api(Object.assign({ action: action }, params || {})).then(function (d) {
+          ocWrite(okey, d);
+          if (f !== state.form) return; // владелица уже ушла на другой экран
+          if (f.data === null || JSON.stringify(d) !== JSON.stringify(f.data)) { f.data = d; render(); countUpAll(app); }
+        });
+      };
+      if (seen !== undefined) {
+        f.data = seen;
+        fetchFresh().catch(function () { /* связи нет — остаются прежние данные */ });
+        draw(seen);
+        return;
+      }
       f.data = null;
       app.replaceChildren(ownerTabs(), skeleton(action === 'owner_today' || action === 'owner_period' ? 'cards' : 'list'));
-      api(Object.assign({ action: action }, params || {})).then(function (d) { f.data = d; render(); countUpAll(app); })
-        .catch(function (e) { f.data = undefined; app.replaceChildren(ownerTabs(), el('div', { class: 'error pad', text: e.message || 'Нет связи' })); });
+      fetchFresh().catch(function (e) { f.data = undefined; app.replaceChildren(ownerTabs(), el('div', { class: 'error pad', text: e.message || 'Нет связи' })); });
       return;
     }
     if (f.data) draw(f.data);
+  }
+
+  /** Прогрев экранов владелицы сразу после входа: потом вкладки открываются без ожидания. */
+  function prefetchOwner() {
+    if (!state.data || state.data.me.role !== 'owner') return;
+    ['owner_catalog', 'owner_shifts', 'owner_team'].forEach(function (a, i) {
+      setTimeout(function () {
+        var key = a + '|' + JSON.stringify(a === 'owner_shifts' ? {} : {});
+        if (ocRead(key) !== undefined) return;
+        api({ action: a }).then(function (d) { ocWrite(key, d); }).catch(function () {});
+      }, 1500 + i * 1500);
+    });
   }
   function kv(label, value, cls) {
     return el('div', { class: 'sum' }, [el('span', { class: 'muted', text: label }), el('span', { class: 'num ' + (cls || ''), text: value })]);
@@ -2161,34 +2231,79 @@
   SCREENS.owner_manage = function () {
     backButton(false);
     mainButton(null);
+    var f = state.form;
     var tile = function (ic, label, sub, screen) {
       return el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left', onclick: function () { openScreen(screen); } },
         [icon(ic), el('b', { text: label }), el('div', { class: 'muted', text: sub })]);
     };
-    app.replaceChildren(
-      el('h1', { class: 'h1', text: 'Управление' }),
-      el('div', { class: 'muted', text: 'Всё, что настраивается в магазине' }),
+    var head = function (t) { return el('div', { class: 'script', style: 'font-size:22px;margin-top:6px', text: t }); };
+    var nodes = [
+      el('h1', { class: 'h1', text: 'Ещё' }),
+      head('Люди'),
       el('div', { class: 'grid2' }, [
-        tile('box', 'Склад и каталог', 'позиции, цены, минимум', 'owner_catalog'),
-        tile('users', 'Сотрудники', 'флористы, ставки, приглашения', 'owner_team'),
-        tile('receipt', 'Расходы месяца', 'аренда, налоги и др.', 'owner_expenses'),
+        tile('users', 'Сотрудники', 'ставки, приглашения', 'owner_team'),
         tile('calendar-event', 'График смен', 'кто когда работает', 'schedule'),
-        tile('user-star', 'Я в смене', 'моя оплата и выход в смену', 'owner_work'),
+        tile('user-star', 'Я в смене', 'моя оплата и выход', 'owner_work')
+      ]),
+      head('Деньги и заказы'),
+      el('div', { class: 'grid2' }, [
+        tile('receipt', 'Расходы месяца', 'аренда, интернет, налоги', 'owner_expenses'),
         tile('calendar-heart', 'Предзаказы', 'список и отмена', 'owner_preorders'),
-        tile('clipboard-list', 'Начальные остатки', 'при запуске, до первой смены', 'owner_start_stock'),
-        tile('user-dollar', 'Долги с прошлого', 'тетрадь → касса', 'owner_start_debt'),
-        tile('adjustments', 'Настройки', 'размен, напоминание, статьи', 'owner_settings')
-      ])
-    );
+        tile('users', 'Должники', 'кто сколько должен', 'owner_debtors')
+      ]),
+      head('Настройки'),
+      el('div', { class: 'grid2' }, [
+        tile('adjustments', 'Настройки', 'размен, напоминание', 'owner_settings')
+      ]),
+      liteToggle(),
+      el('button', { class: 'btn', onclick: function () { f.launch = !f.launch; render(); } }, [icon(f.launch ? 'chevron-up' : 'chevron-down'), 'Запуск магазина (один раз)'])
+    ];
+    if (f.launch) {
+      nodes.push(el('div', { class: 'muted center', text: 'Нужно только при первом запуске. Каталог и остатки удобнее вносить на вкладке «Склад».' }));
+      nodes.push(el('div', { class: 'grid2' }, [
+        tile('clipboard-list', 'Начальные остатки', 'для позиций без остатка', 'owner_start_stock'),
+        tile('user-dollar', 'Долги с прошлого', 'из тетради', 'owner_start_debt')
+      ]));
+    }
+    app.replaceChildren.apply(app, nodes);
   };
 
+  var TYPICAL = {
+    flowers: ['Роза красная 60 см', 'Роза белая 60 см', 'Роза кустовая', 'Тюльпан', 'Пион', 'Хризантема кустовая', 'Гвоздика', 'Лилия', 'Ирис', 'Гербера', 'Подсолнух', 'Альстромерия', 'Эустома', 'Ранункулюс', 'Орхидея'],
+    greens: ['Эвкалипт', 'Гипсофила', 'Рускус', 'Салал', 'Папоротник', 'Питоспорум'],
+    packaging: ['Крафт-бумага', 'Плёнка', 'Лента атласная', 'Сетка флористическая', 'Коробка для цветов', 'Открытка'],
+    toys: ['Мишка мягкий', 'Шарики'],
+    baskets: ['Корзина плетёная', 'Кашпо']
+  };
+  var DRAFT_KEY = 'flora.draft.cat';
+  function draftGet() { var d = store(DRAFT_KEY); return d && d.uid === uid() && Array.isArray(d.rows) ? d.rows : []; }
+  function draftSet(rows) { store(DRAFT_KEY, rows.length ? { uid: uid(), rows: rows } : null); }
+  function draftRow(cat, name) { return { id: 'r' + Math.random().toString(36).slice(2, 9), cat: cat, name: name || '', price: '', qty: '', cost: '' }; }
+  /** Состояние строки черновика: пустая / верная / с ошибкой (и что именно не так). */
+  function draftCheck(r) {
+    var any = r.name.trim() || String(r.price).trim() || String(r.qty).trim() || String(r.cost).trim();
+    if (!any) return { empty: true };
+    if (!r.name.trim()) return { bad: 'нет названия' };
+    if (!(intOf(r.price) > 0)) return { bad: 'впишите цену' };
+    if (String(r.qty).trim() && intOf(r.qty) === null) return { bad: 'остаток — число' };
+    if (String(r.cost).trim() && intOf(r.cost) === null) return { bad: 'закупка — число' };
+    return { ok: true };
+  }
+
   SCREENS.owner_catalog = function () {
-    backButton(true);
+    backButton(false);
     mainButton(null);
     var f = state.form;
     if (f.cat === undefined) f.cat = 'all';
     if (f.q === undefined) f.q = '';
+    if (f.mode === undefined) f.mode = 'list';
     ownerLoad('owner_catalog', {}, function (list) {
+      var draftCount = draftGet().filter(function (r) { return !draftCheck(r).empty; }).length;
+      var modes = el('div', { class: 'chips' }, [['list', 'Список'], ['add', 'Добавить' + (draftCount ? ' · ' + draftCount : '')]].map(function (m) {
+        return el('button', { class: 'chip', 'aria-pressed': String(f.mode === m[0]), onclick: function () { f.mode = m[0]; render(); } }, [m[1]]);
+      }));
+      if (f.mode === 'add') { drawCatalogAdd(f, list, modes); return; }
+      mainButton(null);
       var q = f.q.trim().toLowerCase();
       var shown = list.filter(function (c) {
         if (q && c.name.toLowerCase().indexOf(q) < 0) return false;
@@ -2209,15 +2324,118 @@
             (c.status === 'review' ? ' · новое, на проверке' : '') + (low ? ' · мало' : '') })
         ]);
       });
-      var search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск позиции', value: f.q, 'aria-label': 'Поиск',
-        oninput: function (e) { f.q = e.target.value; render(); var s = document.querySelector('input[type=search]'); if (s) { s.focus(); s.setSelectionRange(f.q.length, f.q.length); } } });
+      var search = el('input', { class: 'input', type: 'search', placeholder: 'Поиск позиции', value: f.q, 'aria-label': 'Поиск', oninput: function (e) { f.q = e.target.value; render(); } });
       app.replaceChildren.apply(app, [
-        el('h1', { class: 'h1', text: 'Склад и каталог' }),
-        el('button', { class: 'btn btn--primary', onclick: function () { openScreen('owner_item_new'); } }, [icon('plus'), 'Новая позиция']),
-        el('button', { class: 'btn', onclick: function () { openScreen('owner_import'); } }, [icon('list-details'), 'Загрузить списком']),
-        search,
-        chips(cats, f.cat, function (k) { f.cat = k; render(); })
-      ].concat(rows.length ? rows : [emptyState('Ничего не найдено', 'Измените поиск или категорию')]));
+        el('h1', { class: 'h1', text: 'Склад' }),
+        modes,
+        list.length ? search : null,
+        list.length ? chips(cats, f.cat, function (k) { f.cat = k; render(); }) : null
+      ].concat(rows.length ? rows : [emptyState(list.length ? 'Ничего не найдено' : 'Склад пока пуст', list.length ? 'Измените поиск или категорию' : 'Нажмите «Добавить» и внесите позиции строками.',
+        list.length ? null : { label: 'Добавить позиции', onclick: function () { f.mode = 'add'; render(); } })]));
+    });
+  };
+
+  /** Режим «Добавить»: таблица-черновик, строки по категориям, всё сохраняется одной кнопкой. */
+  function drawCatalogAdd(f, list, modes) {
+    var rows = draftGet();
+    var save = function (confirmDups) {
+      var groups = {};
+      rows.forEach(function (r) {
+        if (!draftCheck(r).ok) return;
+        (groups[r.cat] = groups[r.cat] || []).push({ name: r.name.trim(), sale_price: intOf(r.price), qty: intOf(r.qty) || 0, cost: intOf(r.cost) || 0 });
+      });
+      var payload = { groups: Object.keys(groups).map(function (k) { return { category: k, lines: groups[k] }; }), confirm_dups: confirmDups === true };
+      busy(postOp('catalog_import', payload, f.op_id).catch(function (e) {
+        if (e && e.code === 'SIMILAR_ITEMS') { f.dups = (e.details || []).map(function (d) { return d.name; }); return null; }
+        throw e;
+      })).then(function (res) {
+        if (!res) { if (f.dups) { toast('Такие названия уже есть. Если это новые позиции — нажмите «Сохранить» ещё раз.', true); f.confirmDups = true; render(); } return; }
+        draftSet([]); ocClear();
+        if (res.state) setData(res.state, true);
+        haptic('success'); toast('Позиций сохранено: ' + payload.groups.reduce(function (a, g) { return a + g.lines.length; }, 0));
+        openScreen('owner_catalog');
+      });
+    };
+    var upd = function () {
+      var valid = 0, bad = 0;
+      rows.forEach(function (r) { var c = draftCheck(r); if (c.ok) valid++; else if (c.bad) bad++; });
+      mainButton(state.sending ? 'Сохраняем…' : 'Сохранить ' + valid + ' ' + positionsWord(valid), valid > 0 && !bad && !state.sending, function () {
+        var withStock = rows.filter(function (r) { return draftCheck(r).ok && intOf(r.qty) > 0; }).length;
+        askOk('Сохранить ' + valid + ' ' + positionsWord(valid) + (withStock ? ', с остатком: ' + withStock : '') + '?', function () { save(f.confirmDups === true); });
+      });
+    };
+    var rowCard = function (r) {
+      var card = el('div', { class: 'dr', 'data-id': r.id });
+      var mark = function () { var c = draftCheck(r); card.classList.toggle('dr--bad', !!c.bad); var note = card.querySelector('.dr__note'); if (note) note.textContent = c.bad ? c.bad : ''; };
+      var field = function (label, key, numeric) {
+        var inp = el('input', { class: 'input' + (numeric ? ' num' : ''), inputmode: numeric ? 'numeric' : 'text', enterkeyhint: 'next', 'aria-label': label, placeholder: numeric ? '0' : '', value: r[key] });
+        inp.addEventListener('input', function () { r[key] = inp.value; draftSet(rows); mark(); upd(); });
+        return el('label', { class: 'dr__f' }, [el('span', { text: label }), inp]);
+      };
+      var name = el('input', { class: 'input', 'aria-label': 'Название', placeholder: 'Название, например: Пион розовый', enterkeyhint: 'next', maxlength: '80', value: r.name });
+      name.addEventListener('input', function () { r.name = name.value; draftSet(rows); mark(); upd(); });
+      var del = el('button', { class: 'dr__x', type: 'button', 'aria-label': 'Убрать строку' }, [icon('x')]);
+      del.addEventListener('click', function () { rows = rows.filter(function (x) { return x.id !== r.id; }); draftSet(rows); render(); });
+      card.appendChild(el('div', { class: 'dr__top' }, [name, del]));
+      card.appendChild(el('div', { class: 'dr__nums' }, [field('Цена ₸', 'price', true), field('Остаток', 'qty', true), field('Закупка', 'cost', true)]));
+      card.appendChild(el('div', { class: 'dr__note muted' }));
+      mark();
+      return card;
+    };
+    var nodes = [el('h1', { class: 'h1', text: 'Склад' }), modes,
+      el('div', { class: 'muted', text: 'Внесите позиции строками. Обязательны название и цена; остаток и закупку можно не знать. Черновик не пропадёт, если закроете кассу.' }),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn', onclick: function () { openScreen('owner_typical'); } }, [icon('list-check'), 'Выбрать из типовых']),
+        el('button', { class: 'btn', onclick: function () { openScreen('owner_import'); } }, [icon('clipboard-text'), 'Вставить текстом'])
+      ])];
+    Object.keys(CATS).forEach(function (cat) {
+      var mine = rows.filter(function (r) { return r.cat === cat; });
+      if (!mine.length) return;
+      nodes.push(el('div', { class: 'script', style: 'font-size:22px', text: CATS[cat] }));
+      mine.forEach(function (r) { nodes.push(rowCard(r)); });
+    });
+    nodes.push(el('div', { class: 'muted', text: 'Добавить строку в категорию:' }));
+    nodes.push(el('div', { class: 'chips' }, Object.keys(CATS).map(function (cat) {
+      return el('button', { class: 'chip', onclick: function () {
+        var r = draftRow(cat); rows.push(r); draftSet(rows); render();
+        setTimeout(function () { var inp = document.querySelector('.dr[data-id="' + r.id + '"] input'); if (inp) inp.focus(); }, 60);
+      } }, ['+ ' + CATS[cat]]);
+    })));
+    if (f.dups && f.dups.length) nodes.push(el('div', { class: 'card card--note' }, [el('div', { text: 'Эти названия уже есть: ' + f.dups.slice(0, 5).join(', ') }),
+      el('div', { class: 'muted', text: 'Если это другие позиции — нажмите «Сохранить» ещё раз.' })]));
+    app.replaceChildren.apply(app, nodes);
+    upd();
+  }
+
+  /** Типовые позиции: отметьте, что у вас есть, — они добавятся строками в черновик, цены впишете потом. */
+  SCREENS.owner_typical = function () {
+    backButton(true);
+    var f = state.form;
+    if (!f.sel) f.sel = {};
+    ownerLoad('owner_catalog', {}, function (list) {
+      var have = {};
+      list.forEach(function (c) { have[c.name.toLowerCase()] = true; });
+      draftGet().forEach(function (r) { have[r.name.trim().toLowerCase()] = true; });
+      var count = function () { return Object.keys(f.sel).filter(function (k) { return f.sel[k]; }).length; };
+      mainButton(state.sending ? '…' : 'Добавить выбранные (' + count() + ')', count() > 0, function () {
+        var rows = draftGet();
+        Object.keys(TYPICAL).forEach(function (cat) {
+          TYPICAL[cat].forEach(function (n) { if (f.sel[cat + '|' + n]) rows.push(draftRow(cat, n)); });
+        });
+        draftSet(rows);
+        openScreen('owner_catalog', { mode: 'add' });
+      });
+      var nodes = [title('Типовые позиции', 'Отметьте то, что у вас есть. Цены и остатки впишете на следующем шаге.')];
+      Object.keys(TYPICAL).forEach(function (cat) {
+        var names = TYPICAL[cat].filter(function (n) { return !have[n.toLowerCase()]; });
+        if (!names.length) return;
+        nodes.push(el('div', { class: 'script', style: 'font-size:22px', text: CATS[cat] }));
+        nodes.push(el('div', { class: 'chips' }, names.map(function (n) {
+          var key = cat + '|' + n;
+          return el('button', { class: 'chip', 'aria-pressed': String(!!f.sel[key]), onclick: function () { f.sel[key] = !f.sel[key]; render(); } }, [n]);
+        })));
+      });
+      app.replaceChildren.apply(app, nodes);
     });
   };
 
@@ -3013,6 +3231,7 @@
           kv('Не получено: долги', money(s.not_received.debts) + (s.not_received.debts_old ? ' (старше 30 дн. ' + money(s.not_received.debts_old) + ')' : '')),
           kv('Предзаказы к доплате', money(s.not_received.preorders))
         ]),
+        el('button', { class: 'btn', onclick: function () { openScreen('owner_debtors'); } }, [icon('users'), 'Должники' + (s.not_received && s.not_received.debts ? ' · ' + money(s.not_received.debts) : '')]),
         el('button', { class: 'btn', disabled: state.sending, onclick: function () {
           busy(api({ action: 'owner_export', from: range[0], to: range[1] })).then(function (ok) {
             if (ok) toast('Файл Excel придёт вам в чат с ботом');
@@ -3136,6 +3355,7 @@
 
   // ---------- старт ----------
 
+  applyLite();
   if (tg) {
     tg.ready();
     tg.expand();
