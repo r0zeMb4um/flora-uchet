@@ -24,3 +24,16 @@ test('все экраны кассы на месте (защита от случ
   const helpers = ['positionsWord', 'parseImport', 'dayLabel', 'pctBp', 'signedInt', 'liteToggle', 'prefetchOwner', 'draftGet', 'askOk', 'formField', 'ocRead', 'drawCatalogAdd'];
   assert.deepEqual(helpers.filter((n) => !declared.has(n)), []);
 });
+
+test('el() принимает детей и массивом, и одной строкой, и одним элементом (без этого экран ссылки-приглашения не рисовался)', () => {
+  const m = /function el\(tag, attrs, children\) \{[\s\S]*?\n  \}\n/.exec(src);
+  assert.ok(m, 'функция el найдена');
+  const node = (tag) => ({ tag, kids: [], attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { this.kids.push(c); return c; } });
+  const document = { createElement: node, createTextNode: (t) => ({ text: t }) };
+  const el = new Function('document', m[0] + '\nreturn el;')(document);
+  assert.deepEqual(el('button', {}, 'Готово').kids, [{ text: 'Готово' }]);
+  const inner = el('i');
+  assert.deepEqual(el('div', {}, inner).kids, [inner]);
+  assert.deepEqual(el('div', {}, ['a', inner, null]).kids, [{ text: 'a' }, inner]);
+  assert.deepEqual(el('div').kids, []);
+});

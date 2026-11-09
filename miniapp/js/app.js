@@ -60,7 +60,9 @@
       else if (k === 'onclick' || k === 'oninput') e[k] = attrs[k];
       else if (attrs[k] !== false && attrs[k] != null) e.setAttribute(k, attrs[k] === true ? '' : attrs[k]);
     });
-    (children || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    // Дети — массив; но одна строка или один элемент тоже допустимы (раньше «Готово» без скобок ломало экран ссылки-приглашения).
+    if (children !== undefined && children !== null && !Array.isArray(children)) children = [children];
+    (children || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c))); });
     return e;
   }
   function icon(name, cls) { return el('i', { class: 'ti ti-' + name + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' }); }
