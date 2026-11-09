@@ -98,7 +98,7 @@ var MiniApi = (function () {
       openInfo = {
         first: view.rows('shifts').length === 0,
         prev_cash: closed.length ? closed[closed.length - 1].next_cash : 0,
-        partners: view.rows('staff').filter(function (s) { return (s.role === 'florist' || (s.role === 'owner' && s.works_shifts === true)) && s.active === true && s.staff_id !== staff.staff_id; })
+        partners: view.rows('staff').filter(function (s) { return (s.role === 'florist' || (s.role === 'owner' && s.works_shifts === true)) && s.active === true && String(s.telegram_id || '') !== '' && s.staff_id !== staff.staff_id; })
           .map(function (s) { return { staff_id: s.staff_id, name: s.name }; })
       };
     }

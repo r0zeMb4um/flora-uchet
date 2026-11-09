@@ -632,7 +632,7 @@ var Ops = (function () {
 
   H.stock_start = function (view, p, plan) {
     requireOwner(view);
-    if (view.openShift()) throw opsError('SHIFT_OPEN', 'Стартовые остатки вносятся, когда смена закрыта');
+    if (view.openShift()) throw opsError('SHIFT_OPEN', 'Сейчас идёт смена, а стартовые остатки вносятся, когда смена закрыта. Новый товар внесите приходом: «Склад» → «Принять товар».');
     moveStock(plan, view, list(p.lines, 'позиции'), 'start', { sign: 1 });
     plan.result = { lines: p.lines.length };
   };
@@ -1068,7 +1068,7 @@ var Ops = (function () {
     if (dups.length && p.confirm_dups !== true) {
       throw opsError('SIMILAR_ITEMS', 'Такие названия уже есть: ' + dups.slice(0, 5).map(function (d) { return d.name; }).join(', '), dups);
     }
-    if (anyQty && view.openShift()) throw opsError('SHIFT_OPEN', 'Остатки вносятся, когда смена закрыта');
+    if (anyQty && view.openShift()) throw opsError('SHIFT_OPEN', 'Сейчас идёт смена, а стартовые остатки вносятся, когда смена закрыта. Сохраните позиции без остатка, а штуки внесите приходом: «Склад» → «Принять товар» (или закройте смену и внесите здесь).');
     rows.forEach(function (r) {
       var id = 'i-' + plan.op_id + '-' + r.k;
       add(plan, view, 'catalog', {

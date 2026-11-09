@@ -240,7 +240,8 @@
     t.className = 'toast' + (isError ? ' toast--error' : '');
     t.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(function () { t.hidden = true; }, isError ? 5000 : 2500);
+    // Длинное сообщение об ошибке читается дольше: 4 с + по 45 мс на символ, не больше 14 с.
+    toast._t = setTimeout(function () { t.hidden = true; }, isError ? Math.min(14000, 4000 + String(text).length * 45) : 2500);
   }
   function haptic(kind) {
     try {
@@ -2441,7 +2442,7 @@
       mine.forEach(function (r) { nodes.push(rowCard(r)); });
     });
     nodes.push(el('div', { class: 'muted', text: 'Добавить строку в категорию:' }));
-    nodes.push(el('div', { class: 'chips' }, Object.keys(CATS).map(function (cat) {
+    nodes.push(el('div', { class: 'chips chips--wrap' }, Object.keys(CATS).map(function (cat) {
       return el('button', { class: 'chip', onclick: function () {
         var r = draftRow(cat); rows.push(r); draftSet(rows); render();
         setTimeout(function () { var inp = document.querySelector('.dr[data-id="' + r.id + '"] input'); if (inp) inp.focus(); }, 60);
@@ -2476,7 +2477,7 @@
         var names = TYPICAL[cat].filter(function (n) { return !have[n.toLowerCase()]; });
         if (!names.length) return;
         nodes.push(el('div', { class: 'script', style: 'font-size:22px', text: CATS[cat] }));
-        nodes.push(el('div', { class: 'chips' }, names.map(function (n) {
+        nodes.push(el('div', { class: 'chips chips--wrap' }, names.map(function (n) {
           var key = cat + '|' + n;
           return el('button', { class: 'chip', 'aria-pressed': String(!!f.sel[key]), onclick: function () { f.sel[key] = !f.sel[key]; render(); } }, [n]);
         })));
