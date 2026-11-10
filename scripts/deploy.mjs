@@ -8,6 +8,7 @@ const clasp = process.platform === 'win32' ? 'npx.cmd --yes @google/clasp@3.4.1'
 const run = (cmd) => { console.log('› ' + cmd); execSync(cmd, { stdio: 'inherit', shell: true }); };
 
 fs.copyFileSync('apps-script/core/calc.js', 'miniapp/js/calc.js');
+fs.copyFileSync('apps-script/core/guide.js', 'miniapp/js/guide.js');
 run('npm test');
 run('node scripts/check-gas.mjs');
 run(`${clasp} push --force`);

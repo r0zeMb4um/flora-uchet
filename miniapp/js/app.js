@@ -937,7 +937,7 @@
     owner_manage: 'owner_manage', owner_catalog: 'owner_catalog', owner_item: 'owner_catalog', owner_item_new: 'owner_catalog',
     owner_team: 'owner_manage', owner_staff: 'owner_manage', owner_staff_new: 'owner_manage', owner_invite: 'owner_manage',
     owner_expenses: 'owner_manage', owner_settings: 'owner_manage', owner_preorders: 'owner_manage', owner_preorder: 'owner_manage',
-    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_catalog', owner_typical: 'owner_catalog'
+    owner_start_stock: 'owner_manage', owner_start_debt: 'owner_manage', schedule: 'more', help: 'more', owner_day: 'owner_manage', owner_work: 'owner_manage', owner_import: 'owner_catalog', owner_typical: 'owner_catalog'
   };
   // Куда ведёт «Назад» на экранах управления.
   var OWNER_BACK = {
@@ -1053,6 +1053,8 @@
       el('div', { class: 'hello', text: greeting() + ', ' + firstName(d.me.name) + '!' }),
       el('div', { class: 'muted', text: s ? 'Смена №' + s.shift_no + ' · с ' + String(s.opened_at).slice(11, 16) + (s.florists.length > 1 ? ' · ' + s.florists.map(firstName).join(' и ') : '') : 'Пусть день будет полон красоты' })
     ])];
+    var gb = guideBanner();
+    if (gb) nodes.push(gb);
     if (!s) {
       nodes.push(emptyState('Смена ещё не открыта', d.open_info ? 'Примите кассу и откройте смену — касса сразу оживёт.' : 'Смену открывает флорист.',
         d.open_info ? { label: 'Открыть смену', onclick: function () { openScreen('open'); } } : null));
@@ -1114,7 +1116,8 @@
       head('Смена'),
       el('div', { class: 'grid2' }, [
         el('button', { class: 'btn btn--tile', onclick: go('schedule') }, [icon('calendar-event'), 'График смен']),
-        el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('truck-delivery'), 'Приход и брак'])
+        el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('truck-delivery'), 'Приход и брак']),
+        el('button', { class: 'btn btn--tile btn--wide', onclick: go('help') }, [icon('book'), 'Как пользоваться · поддержка'])
       ]),
       liteToggle(),
       el('div', { class: 'more-end' }, [
@@ -2188,6 +2191,8 @@
     ownerLoad('owner_today', {}, function (d) {
       var r = d.shift;
       var nodes = [ownerTabs()];
+      var gb = guideBanner();
+      if (gb) nodes.push(gb);
       if (d.alerts.length) nodes.push(el('div', { class: 'card card--note' }, d.alerts.map(function (a) { return el('div', { text: '⚠️ ' + a }); })));
       var y = d.yesterday;
       if (y && y.shifts) {
@@ -2275,6 +2280,47 @@
 
   // ---------- владелица: Управление (D29) ----------
 
+  // ---------- «Как пользоваться»: инструкция по роли (текст — apps-script/core/guide.js, он же в боте) ----------
+
+  var GUIDE_SEEN = 'flora.guide.seen';
+  function guideSeen() { var v = store(GUIDE_SEEN); return !!(v && v.uid === uid()); }
+  function guideMarkSeen() { store(GUIDE_SEEN, { uid: uid() }); }
+  function supportOpen() {
+    var url = Guide.SUPPORT.url;
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank');
+  }
+  /** Карточка «Первый раз здесь?» на главной: пока человек не открыл инструкцию или не скрыл карточку. */
+  function guideBanner() {
+    if (guideSeen()) return null;
+    return el('div', { class: 'card card--accent' }, [
+      el('b', { text: 'Первый раз здесь?' }),
+      el('div', { class: 'muted', text: 'Короткая инструкция: что нажимать, чтобы продать, принять товар и закрыть смену. Читается за 2 минуты.' }),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn btn--primary', onclick: function () { guideMarkSeen(); openScreen('help'); } }, [icon('book'), 'Открыть инструкцию']),
+        el('button', { class: 'btn', onclick: function () { guideMarkSeen(); render(); } }, ['Скрыть'])
+      ])
+    ]);
+  }
+  SCREENS.help = function () {
+    backButton(true);
+    mainButton(null);
+    guideMarkSeen();
+    var role = ownerUI() ? 'owner' : 'florist';
+    var nodes = [title('Как пользоваться', role === 'owner' ? 'Для владелицы' : 'Для флориста')];
+    Guide.sections(role).forEach(function (s, i) {
+      nodes.push(el('div', { class: 'card guide' }, [
+        el('div', { class: 'guide__head' }, [icon(s.icon), el('b', { text: (i + 1) + '. ' + s.title })]),
+        el('ul', { class: 'guide__steps' }, s.steps.map(function (t) { return el('li', { text: t }); }))
+      ]));
+    });
+    nodes.push(el('div', { class: 'card' }, [
+      el('b', { text: 'Нужна помощь?' }),
+      el('div', { class: 'muted', text: 'Опишите, что делали и что увидели на экране (лучше со скриншотом). Поддержка: ' + Guide.SUPPORT.name }),
+      el('button', { class: 'btn btn--primary', onclick: supportOpen }, [icon('brand-telegram'), 'Написать в поддержку'])
+    ]));
+    app.replaceChildren.apply(app, nodes);
+  };
+
   SCREENS.owner_manage = function () {
     backButton(false);
     mainButton(null);
@@ -2300,7 +2346,8 @@
       ]),
       head('Настройки'),
       el('div', { class: 'grid2' }, [
-        tile('adjustments', 'Настройки', 'размен, напоминание', 'owner_settings')
+        tile('adjustments', 'Настройки', 'размен, напоминание', 'owner_settings'),
+        tile('book', 'Как пользоваться', 'инструкция и поддержка', 'help')
       ]),
       liteToggle(),
       el('button', { class: 'btn', onclick: function () { f.launch = !f.launch; render(); } }, [icon(f.launch ? 'chevron-up' : 'chevron-down'), 'Запуск магазина (один раз)'])

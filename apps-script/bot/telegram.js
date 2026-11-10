@@ -60,5 +60,18 @@ var Tg = (function () {
     return body.result;
   }
 
-  return { call: call, send: send, sendPhoto: sendPhoto, sendDocument: sendDocument, esc: esc, money: money };
+  /**
+   * Гифка в чат. animation — file_id (уже загружена в Telegram) или https-ссылка на .gif/.mp4.
+   * Не получилось (неверный файл, нет доступа) — не страшно: возвращаем false, инструкция уйдёт текстом.
+   */
+  function sendAnimation(chatId, animation, caption) {
+    try {
+      call('sendAnimation', { chat_id: chatId, animation: animation, caption: caption || '', parse_mode: 'HTML' });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  return { call: call, send: send, sendPhoto: sendPhoto, sendDocument: sendDocument, sendAnimation: sendAnimation, esc: esc, money: money };
 })();

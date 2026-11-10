@@ -61,6 +61,11 @@ var Webhook = (function () {
 
     try {
       if (text === '/id') return Tg.send(chatId, 'Ваш Telegram ID: <code>' + tgId + '</code>');
+      // Администратор прислал гифку или видео — отвечаем её file_id (его вписывают в свойства GUIDE_GIF_FLORIST / GUIDE_GIF_OWNER).
+      var media = msg && (msg.animation || msg.video || (msg.document && /^(video|image\/gif)/.test(String(msg.document.mime_type || '')) ? msg.document : null));
+      if (media && tgId === String(PropertiesService.getScriptProperties().getProperty('ADMIN_TELEGRAM_ID') || '')) {
+        return Tg.send(chatId, 'file_id этой гифки:\n<code>' + Tg.esc(media.file_id) + '</code>\n\nВставьте его в свойство скрипта GUIDE_GIF_FLORIST (для флористов) или GUIDE_GIF_OWNER (для владелицы).');
+      }
       if (text.indexOf('/start') === 0) {
         var token = text.split(/\s+/)[1];
         if (token) return showConsent_(store, chatId, token);
@@ -69,9 +74,11 @@ var Webhook = (function () {
       if (data.indexOf('consent:') === 0) return acceptConsent_(store, chatId, from, data.slice(8));
 
       var me = staffByTg_(store, tgId);
-      if (!me) return Tg.send(chatId, 'Нет доступа. Попросите у владелицы магазина ссылку-приглашение.');
+      if (!me) return Tg.send(chatId, 'Нет доступа. Попросите у владелицы магазина ссылку-приглашение.\n' + Guide.supportLine());
       var ctx = { client_id: me.client_id, point_id: me.point_id, staff_id: me.staff_id, role: me.role, now: nowIso(), tg: tgId };
 
+      if (text === '/help' || text === 'Как пользоваться') return sendGuide_(chatId, me.role, false);
+      if (text === '/support' || text === 'Поддержка') return sendSupport_(chatId);
       if (text === 'Открыть смену') { flowDeps_(store, ctx, chatId).state.clear(); return OpenShiftFlow.start(store, ctx, chatId); }
       if (data.indexOf('oc:') === 0) return OpenShiftFlow.onButton(store, ctx, chatId, data, update.update_id);
       if (text && OpenShiftFlow.waitsForInput(ctx)) return OpenShiftFlow.onText(store, ctx, chatId, text);
@@ -159,6 +166,25 @@ var Webhook = (function () {
       if (o.telegram_id !== tgId) Tg.send(o.telegram_id, '👤 Подключился сотрудник: ' + who);
     });
     showMenu_(store, chatId, tgId, true);
+    sendGuide_(chatId, joined.role, true); // первый вход: короткая инструкция по роли
+  }
+
+  // ---------- инструкция и поддержка ----------
+
+  /** Инструкция по роли. Если администратор загрузил гифку (свойство GUIDE_GIF_FLORIST / GUIDE_GIF_OWNER), она идёт первой. */
+  function sendGuide_(chatId, role, first) {
+    var owner = role === 'owner';
+    var gif = PropertiesService.getScriptProperties().getProperty(owner ? 'GUIDE_GIF_OWNER' : 'GUIDE_GIF_FLORIST');
+    if (gif) Tg.sendAnimation(chatId, gif, first ? 'Как это работает 👆' : '');
+    var parts = Guide.botMessages(owner ? 'owner' : 'florist');
+    parts.forEach(function (p, i) {
+      Tg.send(chatId, p, i === parts.length - 1 ? { reply_markup: { inline_keyboard: [[{ text: 'Написать в поддержку', url: Guide.SUPPORT.url }]] } } : undefined);
+    });
+  }
+
+  function sendSupport_(chatId) {
+    Tg.send(chatId, 'Поддержка: ' + Guide.SUPPORT.name + '\nОпишите, что делали и что увидели на экране (лучше со скриншотом).',
+      { reply_markup: { inline_keyboard: [[{ text: 'Написать в поддержку', url: Guide.SUPPORT.url }]] } });
   }
 
   // ---------- меню ----------
@@ -167,13 +193,13 @@ var Webhook = (function () {
     var me = staffByTg_(store, tgId);
     if (!me) {
       return Tg.send(chatId, 'Здравствуйте! Это бот учёта цветочного магазина — он для сотрудников.\n' +
-        'Попросите у владелицы ссылку-приглашение.\n\nВаш Telegram ID: <code>' + tgId + '</code>');
+        'Попросите у владелицы ссылку-приглашение.\n' + Guide.supportLine() + '\n\nВаш Telegram ID: <code>' + tgId + '</code>');
     }
     var view = Ops.makeView(store, { client_id: me.client_id, point_id: me.point_id, staff_id: me.staff_id, role: me.role, now: nowIso() });
     var shift = view.openShift();
     var lines = [];
     if (greet) lines.push('Здравствуйте, ' + Tg.esc(me.name) + '!');
-    var cashButton = [[{ text: 'Открыть кассу', web_app: { url: MINIAPP_URL } }]];
+    var cashButton = [[{ text: 'Открыть кассу', web_app: { url: MINIAPP_URL } }], [{ text: 'Как пользоваться' }, { text: 'Поддержка' }]];
     if (me.role === 'owner' || me.role === 'florist') {
       // D29: всё управление и работа смены — в кассе. Чат — для отчётов, напоминаний и срочных сообщений.
       if (me.role === 'owner') {

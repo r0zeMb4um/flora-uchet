@@ -492,3 +492,8 @@ body.lite *, body.lite *::before, body.lite *::after { -webkit-backdrop-filter: 
 body.lite .petals { display: none; }
 body.lite::before { background: linear-gradient(160deg, var(--bg-deep) 0%, var(--bg-mid) 55%, var(--bg-light) 100%); }
 body.lite .card, body.lite .tile, body.lite .btn, body.lite .chip, body.lite .search, body.lite .input, body.lite .top, body.lite .nav { background: var(--glass-strong, rgba(36, 84, 93, .9)); }
+
+/* Инструкция «Как пользоваться». */
+.guide__head { display: flex; align-items: center; gap: 8px; font-size: 17px; }
+.guide__head i.ti { font-size: 22px; color: var(--rose-soft, #fcd6e2); }
+.guide__steps { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.45; }
