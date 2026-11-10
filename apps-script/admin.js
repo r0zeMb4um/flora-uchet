@@ -77,15 +77,19 @@ function correctReceipt() {
  */
 function resetTestData() {
   var CONFIRM = false;           // ← true — очистить по-настоящему
+  // Передача настоящей владелице: впишите её имя — останется ОДНА владелица с этим именем, без привязки к вашему Telegram
+  // (все тестовые владелицы и флористы уйдут). Потом запустите inviteOwner с этим же именем и отправьте ей ссылку.
+  // Оставьте пустым, чтобы сохранить всех владельцев как есть.
+  var OWNER_NAME = '';
   var store = SheetsStore.open();
   var ss = store.spreadsheet;
   var plan = Maintenance.planReset({
     staff: store.rows('staff'), invites: store.rows('invites'), ops_log: store.rows('ops_log'),
     clients: store.rows('clients'), points: store.rows('points'), settings: store.rows('settings')
-  });
+  }, OWNER_NAME);
   var report = [];
   plan.wipeSheets.forEach(function (n) { report.push(n + ': ' + store.rows(n).length + ' строк'); });
-  report.push('staff: останется владельцев ' + plan.keepStaff.length + ' из ' + store.rows('staff').length);
+  report.push('staff: останется владельцев ' + plan.keepStaff.length + ' из ' + store.rows('staff').length + (OWNER_NAME ? ' (имя «' + OWNER_NAME + '», без привязки к Telegram)' : ''));
   report.push('invites: останется ' + plan.keepInvites.length + ' из ' + store.rows('invites').length);
   report.push('ops_log: останется ' + plan.keepOps.length + ' из ' + store.rows('ops_log').length);
   Logger.log('Будет очищено:\n' + report.join('\n'));
@@ -118,5 +122,5 @@ function resetTestData() {
   var props = PropertiesService.getScriptProperties();
   Object.keys(props.getProperties()).forEach(function (k) { if (k.indexOf('REMINDED_') === 0 || k.indexOf('PERF_') === 0) props.deleteProperty(k); });
   props.setProperty('DATA_VERSION', String(Date.now()));
-  Logger.log('ГОТОВО. Осталась владелица и настройки. Дальше: приглашайте флористов («Управление» → «Сотрудники») и загружайте каталог.');
+  Logger.log('ГОТОВО. Осталась владелица и настройки.' + (OWNER_NAME ? ' Теперь запустите inviteOwner с именем «' + OWNER_NAME + '» и отправьте ей ссылку.' : '') + ' Дальше: флористов приглашает владелица («Ещё» → «Сотрудники»), каталог вносится на вкладке «Склад».');
 }

@@ -41,3 +41,27 @@ test('чистка тестовых данных: остаётся владел�
   assert.ok(plan.wipeSheets.includes('receipts') && plan.wipeSheets.includes('catalog') && plan.wipeSheets.includes('stock_balance'));
   assert.ok(!plan.wipeSheets.includes('clients') && !plan.wipeSheets.includes('settings') && !plan.wipeSheets.includes('staff'));
 });
+
+test('чистка с именем владелицы: остаётся одна владелица, переименованная и без Telegram, без старых ссылок; флористы и лишние владельцы уходят', () => {
+  const data = {
+    staff: [
+      { staff_id: 'own-1', role: 'owner', name: 'Кирилл-тест', telegram_id: '111', consent_at: 'x', consent_version: '1', active: true, op_id: 'seed' },
+      { staff_id: 'own-2', role: 'owner', name: 'Вторая', telegram_id: '222', active: true, op_id: 'o2' },
+      { staff_id: 'st-1', role: 'florist', name: 'Анна', telegram_id: '333', active: true, op_id: 'o3' }
+    ],
+    invites: [{ token: 't1', staff_id: 'own-1', op_id: 'o4' }, { token: 't2', staff_id: 'st-1', op_id: 'o5' }],
+    ops_log: [{ op_id: 'seed' }, { op_id: 'o2' }, { op_id: 'o3' }, { op_id: 'o4' }],
+    clients: [], points: [], settings: []
+  };
+  const plan = M.planReset(data, 'Айгуль');
+  assert.equal(plan.keepStaff.length, 1);
+  assert.equal(plan.keepStaff[0].staff_id, 'own-1');
+  assert.equal(plan.keepStaff[0].name, 'Айгуль');
+  assert.equal(plan.keepStaff[0].telegram_id, '');
+  assert.equal(plan.keepStaff[0].consent_at, '');
+  assert.deepEqual(plan.keepInvites, []);
+  // без имени — прежнее поведение: все владельцы и их приглашения остаются
+  const same = M.planReset(data);
+  assert.deepEqual(same.keepStaff.map((s) => s.staff_id), ['own-1', 'own-2']);
+  assert.deepEqual(same.keepInvites.map((i) => i.token), ['t1']);
+});

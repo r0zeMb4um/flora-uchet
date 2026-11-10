@@ -71,11 +71,18 @@ var Maintenance = (function () {
    * Всё остальное — каталог, покупатели, смены, чеки, склад, расходы, график, сотрудники-флористы, журнал — очищается.
    * data: { staff, invites, ops_log, clients, points, settings } — строки листов. Возвращает, что оставить.
    */
-  function planReset(data) {
+  function planReset(data, ownerName) {
     var keepStaff = (data.staff || []).filter(function (s) { return s.role === 'owner'; });
+    // Передача магазина: остаётся ОДНА владелица с настоящим именем, без привязки к чьему-либо Telegram и без старых ссылок.
+    // Новую ссылку для неё делает inviteOwner с тем же именем.
+    if (ownerName) {
+      keepStaff = keepStaff.slice(0, 1).map(function (s) {
+        return Object.assign({}, s, { name: ownerName, telegram_id: '', consent_at: '', consent_version: '', active: true });
+      });
+    }
     var ownerIds = {};
     keepStaff.forEach(function (s) { ownerIds[s.staff_id] = true; });
-    var keepInvites = (data.invites || []).filter(function (i) { return ownerIds[i.staff_id]; });
+    var keepInvites = ownerName ? [] : (data.invites || []).filter(function (i) { return ownerIds[i.staff_id]; });
     var keepOps = { seed: true };
     [data.clients, data.points, data.settings, keepStaff, keepInvites].forEach(function (rows) {
       (rows || []).forEach(function (r) { if (r.op_id) keepOps[r.op_id] = true; });
