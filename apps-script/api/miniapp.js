@@ -169,7 +169,7 @@ var MiniApi = (function () {
 
   /** Одноразовый токен приглашения (не короче 16 символов). */
   function newToken() {
-    if (typeof Utilities !== 'undefined') return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    if (typeof Utilities !== 'undefined') return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, 32);
     return require('node:crypto').randomBytes(16).toString('hex');
   }
   function botName() {

@@ -136,15 +136,25 @@ var Webhook = (function () {
     if (!inv) return Tg.send(chatId, 'Ссылка-приглашение недействительна или уже использована. Попросите у владелицы новую.');
     var staff = store.find('staff', 'staff_id', inv.staff_id)[0];
     Tg.send(chatId, 'Здравствуйте, ' + Tg.esc(staff ? staff.name : '') + '!\n\n' + Tg.esc(CONSENT_TEXT_V1), {
-      reply_markup: { inline_keyboard: [[{ text: 'Согласен', callback_data: 'consent:' + token }]] }
+      // В callback_data Telegram пускает не больше 64 байт: длинный токен (раньше 64 символа) обрезаем, по началу находим приглашение.
+      reply_markup: { inline_keyboard: [[{ text: 'Согласен', callback_data: 'consent:' + token.slice(0, 40) }]] }
     });
   }
 
-  function acceptConsent_(store, chatId, from, token) {
+  /** Приглашение по началу токена (из кнопки «Согласен»); начало короче 16 символов не принимаем. */
+  function inviteByPrefix_(store, prefix) {
+    if (String(prefix).length < 16) return null;
+    var inv = store.rows('invites').filter(function (i) { return String(i.token).indexOf(prefix) === 0; })[0];
+    return inv && validInvite_(store, inv.token);
+  }
+
+  function acceptConsent_(store, chatId, from, prefix) {
     var tgId = String(from.id);
+    var token = '';
     var joined = store.withLock(function () {
-      var inv = validInvite_(store, token);
+      var inv = inviteByPrefix_(store, prefix);
       if (!inv) return null;
+      token = inv.token;
       var now = nowIso();
       // Один Telegram — один сотрудник в магазине: прежняя привязка этого аккаунта снимается.
       store.rows('staff').filter(function (s) {
