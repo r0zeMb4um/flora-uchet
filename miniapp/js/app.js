@@ -1073,7 +1073,7 @@
       var low = d.catalog.filter(function (c) { return c.stock < c.min; });
       nodes.push(el('div', { class: 'grid2' }, [
         el('div', { class: 'card card--accent' }, [icon('chart-line'), el('div', { class: 'muted', text: 'Выручка смены' }),
-          numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count })]),
+          numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count + (s.refunds > 0 ? ' · возвраты −' + money(s.refunds) : '') })]),
         s.my_pay ? el('div', { class: 'card' }, [icon('wallet'), el('div', { class: 'muted', text: 'Мой заработок' }),
           numEl(s.my_pay.total, true),
           el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) })]) : null,

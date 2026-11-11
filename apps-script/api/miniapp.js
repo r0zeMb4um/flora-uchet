@@ -48,6 +48,7 @@ var MiniApi = (function () {
         on_shift: !!mine,
         revenue: rep.revenue,
         receipts_count: rep.receipts_count,
+        refunds: (rep.refunds_cash || 0) + (rep.refunds_card || 0), // возвраты за смену: флорист видит, что возврат записан (расчётную кассу — нет)
         my_pay: mine ? { rate: mine.rate, pct: mine.pct, total: mine.total } : null,
         inventory_done: view.rows('ops_log').some(function (o) { return o.kind === 'inventory' && o.shift_id === shift.shift_id; }),
         expenses: { delivery: rep.delivery, other: rep.other, withdrawal: rep.withdrawal, pay_adjust: rep.pay_adjust }

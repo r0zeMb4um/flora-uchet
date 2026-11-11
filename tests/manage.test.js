@@ -285,6 +285,21 @@ test('закупочная цена: меняется в карточке поз
   assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').cost, 650);
 });
 
+// ---------- возвраты на главной флориста ----------
+
+test('возврат виден флористу на главной сразу (сумма возвратов смены), расчётная касса в ответе по-прежнему скрыта', () => {
+  const { call, post, owner, seedPost } = shop();
+  seedPost(owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 10 }] });
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  const s = post(777, 'sale', { items: [{ item_id: 'rose', qty: 2 }], price: 2400, payments: [{ method: 'cash', amount: 2400 }] });
+  assert.equal(call(777, { action: 'bootstrap' }).shift.refunds, 0);
+  post(777, 'refund', { receipt_id: s.data.result.receipt_id, mode: 'money', method: 'cash', amount: 500 });
+  const shift = call(777, { action: 'bootstrap' }).shift;
+  assert.equal(shift.refunds, 500);
+  assert.equal(shift.revenue, 2400, 'выручка смены — по продажам, возврат отдельной строкой (ТЗ)');
+  assert.ok(!JSON.stringify(shift).includes('calc_cash'), 'расчётной суммы кассы флористу не показываем');
+});
+
 // ---------- остатки флористом: приход без суммы ----------
 
 test('приход с суммой 0 (остатки на старте от флориста) не затирает известную закупочную цену, а с суммой — обновляет', () => {
