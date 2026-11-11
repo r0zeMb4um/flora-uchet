@@ -510,7 +510,8 @@ var Ops = (function () {
     var costs = {};
     lines.forEach(function (l) { costs[l.item_id] = C.unitCost(l.cost_sum, l.qty); });
     Object.keys(costs).forEach(function (id) {
-      update(plan, 'catalog', { item_id: id, client_id: plan.client_id }, view.item(id), { last_cost: costs[id] });
+      // Приход «без суммы» (остатки на старте) не затирает уже известную закупочную цену нулём.
+      if (costs[id] > 0) update(plan, 'catalog', { item_id: id, client_id: plan.client_id }, view.item(id), { last_cost: costs[id] });
     });
     plan.result = { total_cost: lines.reduce(function (a, l) { return a + l.cost_sum; }, 0), lines: lines.length };
   };

@@ -285,6 +285,19 @@ test('закупочная цена: меняется в карточке поз
   assert.equal(call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose').cost, 650);
 });
 
+// ---------- остатки флористом: приход без суммы ----------
+
+test('приход с суммой 0 (остатки на старте от флориста) не затирает известную закупочную цену, а с суммой — обновляет', () => {
+  const { call, post } = shop();
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  post(777, 'income', { lines: [{ item_id: 'rose', qty: 40, cost_sum: 0 }], supplier: 'Остатки на старт' });
+  const rose = () => call(1, { action: 'owner_catalog' }).find((c) => c.item_id === 'rose');
+  assert.equal(rose().stock, 40);
+  assert.equal(rose().cost, 650, 'закупка осталась прежней');
+  post(777, 'income', { lines: [{ item_id: 'rose', qty: 10, cost_sum: 7000 }], supplier: 'Опт' });
+  assert.equal(rose().cost, 700, 'с суммой — новая цена за штуку');
+});
+
 // ---------- удаление скрытой позиции (D38) ----------
 
 test('удаление скрытой позиции: только владелица, только скрытая и с нулевым остатком; история и отчёты целы', () => {
