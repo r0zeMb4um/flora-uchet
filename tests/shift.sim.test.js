@@ -505,10 +505,11 @@ test('отчёт смены №214 текстом: все цифры этало�
     'ВОЗВРАТЫ: нал 2 000 ₸',
     'на начало 15 000 ₸ → расчёт 32 500 ₸ → пересчёт 32 498 ₸',
     'РАСХОЖДЕНИЕ: −2 ₸ (недостача)',
-    'остаток на следующую смену (после ЗП и изъятия): 10 400 ₸',
+    'остаток на следующую смену (после ЗП и изъятия): 10 460 ₸',
+    'процент флориста считается от 67 900 ₸ (выручка минус возвраты)',
     'БЕЗНАЛ ДЛЯ СВЕРКИ С KASPI: 27 400 ₸',
-    'Анна: ставка 5 000 ₸ + % 1 049 ₸ = 6 049 ₸',
-    'Мира: ставка 5 000 ₸ + % 1 049 ₸ = 6 049 ₸',
+    'Анна: ставка 5 000 ₸ + % 1 019 ₸ = 6 019 ₸',
+    'Мира: ставка 5 000 ₸ + % 1 019 ₸ = 6 019 ₸',
     'РАСХОДЫ: доставка 2 500 ₸ · прочее 4 000 ₸',
     'ИЗЪЯТИЕ: 10 000 ₸',
     'приход: Роза красная 60 см +50 (32 500 ₸)',
@@ -591,8 +592,8 @@ test('исправление: чек в закрытой смене снят, в
   assert.equal(after.calc_cash, before.calc_cash, 'наличные факты не меняются');
   assert.equal(after.cash_diff, before.cash_diff);
   assert.equal(after.next_cash, before.next_cash);
-  // % каждой: round(65 400 × 3% / 2) = 981; выдано 1 049 → переплачено 68.
-  assert.deepEqual(after.payroll.map((p) => [p.pct, p.paid, p.unpaid]), [[981, 6049, -68], [981, 6049, -68]]);
+  // База: 65 400 − 2 000 возврат = 63 400; % каждой: round(63 400 × 3% / 2) = 951; выдано 1 019 → переплачено 68.
+  assert.deepEqual(after.payroll.map((p) => [p.pct, p.paid, p.unpaid]), [[951, 6019, -68], [951, 6019, -68]]);
   assert.equal(w.view().debtOf(w.customerId('Айгуль')), 0);
   assert.equal(w.view().stock('toy_bear'), 5);
   const v = w.view();
@@ -600,7 +601,7 @@ test('исправление: чек в закрытой смене снят, в
   v.rows('staff').forEach((s) => { names.staff[s.staff_id] = s.name; });
   const t = Reports.shiftText(after, names).replace(/ /g, ' ');
   assert.ok(t.includes('<b>ИСПРАВЛЕНО</b> (1)'));
-  assert.ok(t.includes('Анна: ставка 5 000 ₸ + % 981 ₸ = 5 981 ₸ — <b>переплачено 68 ₸</b>'));
+  assert.ok(t.includes('Анна: ставка 5 000 ₸ + % 951 ₸ = 5 951 ₸ — <b>переплачено 68 ₸</b>'));
   assert.throws(() => w.post('s_owner', 'correction', { receipt_id: r4.receipt_id, reason: 'ещё раз' }), { code: 'UNKNOWN_RECEIPT' });
 });
 
@@ -629,10 +630,10 @@ test('сводка за период по двум сменам (вчера + �
   assert.equal(s.cash, 30000 + 23000 + 3000 - 2000);
   assert.equal(s.card, 27400);
   assert.deepEqual(s.by_supplier, { 'Флора-опт': 32500 });
-  assert.equal(s.payroll, 5900 + 12098);
-  assert.deepEqual(s.payroll_by.map((p) => [p.staff_id, p.shifts, p.rate, p.pct]), [['s_anna', 2, 10000, 900 + 1049], ['s_mira', 1, 5000, 1049]]);
-  // Прибыль = 99 900 − 2 000 возврат − 32 500 закупки − 17 998 ЗП − 2 500 доставка − 4 000 прочее.
-  assert.equal(s.profit, 40902);
+  assert.equal(s.payroll, 5900 + 12038);
+  assert.deepEqual(s.payroll_by.map((p) => [p.staff_id, p.shifts, p.rate, p.pct]), [['s_anna', 2, 10000, 900 + 1019], ['s_mira', 1, 5000, 1019]]);
+  // Прибыль = 99 900 − 2 000 возврат − 32 500 закупки − 17 938 ЗП − 2 500 доставка − 4 000 прочее.
+  assert.equal(s.profit, 40962);
   assert.deepEqual(s.losses, { defects: 1950, replaces: 0, shortage: 650, cash_diff: -2 });
   assert.deepEqual(s.discounts_by, { s_anna: 600 });
   assert.equal(s.withdrawal, 9100 + 10000);
@@ -641,11 +642,11 @@ test('сводка за период по двум сменам (вчера + �
 
   // Расходы владелицы за месяц периода уменьшают прибыль, касса не меняется.
   w.post('s_owner', 'owner_expense', { month: dates[0].slice(0, 7), item: 'Аренда', amount: 40000 });
-  assert.equal(Summary.period(w.view(), dates[0], dates[1] || dates[0]).profit, 902);
+  assert.equal(Summary.period(w.view(), dates[0], dates[1] || dates[0]).profit, 962);
 
   const t = Reports.periodText(Summary.period(w.view(), dates[0], dates[0]), { staff: { s_anna: 'Анна', s_mira: 'Мира' } }).replace(/ /g, ' ');
   for (const line of ['Выручка <b>99 900 ₸</b> (смен 2, чеков 6, средний чек 16 650 ₸)', 'Закупки 32 500 ₸ (Флора-опт 32 500 ₸)',
-    'Анна: смен 2, ставка 10 000 ₸, % 1 949 ₸', 'Аренда 40 000 ₸', '<b>ПРИБЫЛЬ 902 ₸</b>', 'предзаказы к доплате 15 000 ₸']) {
+    'Анна: смен 2, ставка 10 000 ₸, % 1 919 ₸', 'Аренда 40 000 ₸', '<b>ПРИБЫЛЬ 962 ₸</b>', 'предзаказы к доплате 15 000 ₸']) {
     assert.ok(t.includes(line), 'нет строки: ' + line + '\n' + t);
   }
   assert.throws(() => Summary.period(v, '2026-11-10', '2026-11-01'), { code: 'BAD_INPUT' });

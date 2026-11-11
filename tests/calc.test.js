@@ -106,7 +106,7 @@ test('эталонная смена №214: все цифры совпадают
     assert.equal(s.unpaidPreorders.reduce((a, x) => a + x, 0), exp.unpaid_preorder);
   });
 
-  const pay = Calc.payroll(rev.revenue, shiftStaff);
+  const pay = Calc.payroll(exp.pay_base, shiftStaff); // D41: база процента = выручка − возвраты денег
   await t.test('процент и зарплата каждой', () => {
     for (const id of g.shift.florist_ids) {
       assert.equal(pay.each[id].pct, exp.pct_each[id], 'процент ' + id);

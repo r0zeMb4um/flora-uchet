@@ -710,7 +710,7 @@ var Ops = (function () {
       var staff = view.shiftStaff(sh.shift_id);
       if (!staff.some(function (x) { return x.staff_id === staffId; })) return;
       var n = shiftNumbers(view, sh);
-      owed += C.payroll(n.revenue.revenue, staff).each[staffId].total;
+      owed += C.payroll(n.pay_base, staff).each[staffId].total;
     });
     view.rows('cash_ops').forEach(function (o) {
       if (o.staff_id === staffId && (o.type === 'rate' || o.type === 'pct' || o.type === 'pay_adjust')) owed -= o.amount;
@@ -776,8 +776,10 @@ var Ops = (function () {
     });
     var ops = view.rows('cash_ops').filter(function (o) { return o.shift_id === shift.shift_id; });
     var rev = C.shiftRevenue(mine);
+    // База процента флориста (решение владелицы, D41): выручка минус ВСЕ возвраты денег, сделанные в эту смену, не меньше нуля.
+    var refunded = pays.reduce(function (a, p) { return a + (p.kind === 'refund' ? p.amount : 0); }, 0);
     return {
-      receipts: mine, payments: pays, cash_ops: ops, revenue: rev,
+      receipts: mine, payments: pays, cash_ops: ops, revenue: rev, refunded: refunded, pay_base: Math.max(0, rev.revenue - refunded),
       calc_cash: C.cashCalc(shift.open_cash, pays, ops), card_total: C.cardTotal(pays)
     };
   }
@@ -789,7 +791,7 @@ var Ops = (function () {
     if (p.expenses_confirmed !== true) throw opsError('CONFIRM_EXPENSES', 'Подтвердите, что все доставки, расходы и изъятия внесены');
     var n = shiftNumbers(view, shift);
     var staff = view.shiftStaff(shift.shift_id);
-    var pay = C.payroll(n.revenue.revenue, staff);
+    var pay = C.payroll(n.pay_base, staff);
     var due = {};
     staff.forEach(function (s) { due[s.staff_id] = pay.each[s.staff_id].total; });
     var close = C.closeShift({
@@ -1203,7 +1205,7 @@ var Ops = (function () {
     // Стоимость потерь — записанная при списании; для старых строк без неё — по текущей закупочной.
     var lossOf = function (m) { return typeof m.cost_sum === 'number' ? m.cost_sum : C.lossCost(m.qty, item(m.item_id).last_cost); };
     var staff = view.shiftStaff(shiftId);
-    var pay = C.payroll(n.revenue.revenue, staff);
+    var pay = C.payroll(n.pay_base, staff);
     var paidBy = function (sid) { return sumWhere(n.cash_ops, function (o) { return o.staff_id === sid && (o.type === 'rate' || o.type === 'pct'); }); };
     var balance = {};
     view.balance().forEach(function (b) { balance[b.item_id] = b.qty; });
@@ -1211,7 +1213,7 @@ var Ops = (function () {
     return {
       shift_id: shiftId, shift_no: shift.shift_no, shift_date: shift.shift_date,
       florists: staff.map(function (s) { return (view.staff(s.staff_id) || {}).name || s.staff_id; }),
-      revenue: n.revenue.revenue, receipts_count: n.revenue.receipts_count, avg_check: n.revenue.avg_check,
+      revenue: n.revenue.revenue, pay_base: n.pay_base, receipts_count: n.revenue.receipts_count, avg_check: n.revenue.avg_check,
       discounts: n.revenue.discounts_total, cancelled_count: n.revenue.cancelled_count,
       sales_cash: sumWhere(n.payments, function (p) { return byOwn(p) && p.method === 'cash'; }),
       sales_card: sumWhere(n.payments, function (p) { return byOwn(p) && p.method === 'card'; }),

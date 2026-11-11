@@ -300,6 +300,24 @@ test('возврат виден флористу на главной сразу 
   assert.ok(!JSON.stringify(shift).includes('calc_cash'), 'расчётной суммы кассы флористу не показываем');
 });
 
+// ---------- процент флориста и возвраты (D41) ----------
+
+test('возврат денег уменьшает процент флориста (любой возврат смены); ставка не меняется; база не уходит ниже нуля', () => {
+  const { call, post, owner, seedPost } = shop();
+  seedPost(owner, 'stock_start', { lines: [{ item_id: 'rose', qty: 30 }] });
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 0 });
+  const mine = () => call(777, { action: 'bootstrap' }).shift.my_pay;
+  const s1 = post(777, 'sale', { items: [{ item_id: 'rose', qty: 5 }], price: 10000, payments: [{ method: 'cash', amount: 10000 }] });
+  assert.deepEqual(mine(), { rate: 5000, pct: 300, total: 5300 }, '3% от 10 000');
+  post(777, 'refund', { receipt_id: s1.data.result.receipt_id, mode: 'money', method: 'cash', amount: 4000 });
+  assert.deepEqual(mine(), { rate: 5000, pct: 180, total: 5180 }, 'база 6 000');
+  post(777, 'refund', { receipt_id: s1.data.result.receipt_id, mode: 'money', method: 'card', amount: 6000 });
+  assert.deepEqual(mine(), { rate: 5000, pct: 0, total: 5000 }, 'вернули всё: процента нет, ставка остаётся');
+  // отчёт владелицы показывает базу процента
+  const rep = call(1, { action: 'owner_today' }).shift;
+  assert.equal(rep.revenue, 10000);
+});
+
 // ---------- остатки флористом: приход без суммы ----------
 
 test('приход с суммой 0 (остатки на старте от флориста) не затирает известную закупочную цену, а с суммой — обновляет', () => {

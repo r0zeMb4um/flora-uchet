@@ -126,10 +126,10 @@
 | calc_cash | int ₸ | 32500 |
 | counted_cash | int ₸ | 32498 |
 | cash_diff | int ₸ | −2 = counted − calc |
-| payroll_total | int ₸ | 12098 — начислено |
+| payroll_total | int ₸ | 12038 — начислено |
 | payroll_unpaid | int ₸ | 0 — к доплате, если наличных не хватило (D18) |
 | close_withdrawal | int ₸ | 10000 |
-| next_cash | int ₸ | 10400 = counted − payroll − close_withdrawal |
+| next_cash | int ₸ | 10460 = counted − payroll − close_withdrawal |
 | status | enum | open / closed |
 
 ### `shift_staff` — флористы смены и их условия (решение D3)

@@ -40,6 +40,7 @@ var Reports = (function () {
     if (prior) L.push('ПОСТУПИЛО ПО ПРОШЛЫМ ДОЛГАМ И ЗАКАЗАМ: ' + prior);
     var refunds = parts([['нал', r.refunds_cash], ['безнал', r.refunds_card], ['замены', r.replaced_qty, 'qty']]);
     if (refunds) L.push('ВОЗВРАТЫ: ' + refunds);
+    if (r.pay_base !== undefined && r.pay_base !== r.revenue) L.push('  процент флориста считается от ' + money(r.pay_base) + ' (выручка минус возвраты)');
 
     L.push('');
     L.push('<b>КАССА</b>');
