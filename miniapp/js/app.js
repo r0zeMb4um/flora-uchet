@@ -925,13 +925,13 @@
     }
     state.screen = FLORIST_BACK[state.screen] || 'main'; render();
   }
-  var FLORIST_BACK = { schedule: 'more', income: 'more', defect: 'more', refund: 'more', cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more' };
+  var FLORIST_BACK = { take_pay: 'more', schedule: 'more', income: 'more', defect: 'more', refund: 'more', cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more' };
 
   // ---------- нижнее меню ----------
 
   var NAV_OF = {
     main: 'main', queue: 'main', stock: 'stock', preorders: 'preorders', more: 'more',
-    cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more', open: 'main',
+    cashout: 'more', withdraw: 'more', repay: 'more', cancel: 'more', take_pay: 'more', open: 'main',
     owner_today: 'owner_today', owner_history: 'owner_history', owner_shift: 'owner_history',
     owner_period: 'owner_period', owner_debtors: 'owner_period',
     owner_manage: 'owner_manage', owner_catalog: 'owner_catalog', owner_item: 'owner_catalog', owner_item_new: 'owner_catalog',
@@ -1076,7 +1076,8 @@
           numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count + (s.refunds > 0 ? ' · возвраты −' + money(s.refunds) : '') })]),
         s.my_pay ? el('div', { class: 'card' }, [icon('wallet'), el('div', { class: 'muted', text: 'Мой заработок' }),
           numEl(s.my_pay.total, true),
-          el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) })]) : null,
+          el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) }),
+          s.my_owed > 0 ? el('div', { class: 'muted num', text: 'накоплено: ' + money(s.my_owed) }) : null]) : null,
         el('button', { class: 'card btn--tile', style: 'font:inherit;color:inherit;cursor:pointer', onclick: function () { openScreen('preorders'); } }, [
           icon('calendar-heart'), el('div', { class: 'muted', text: 'Предзаказы' }), el('div', { class: 'big num', text: String(orders.length) }),
           el('div', { class: 'muted', text: soon ? soon + ' на сегодня-завтра' : 'ближайших нет' })]),
@@ -1117,6 +1118,8 @@
       el('div', { class: 'grid2' }, [
         el('button', { class: 'btn btn--tile', onclick: go('schedule') }, [icon('calendar-event'), 'График смен']),
         el('button', { class: 'btn btn--tile', onclick: go('stock') }, [icon('truck-delivery'), 'Приход и брак']),
+        state.data.shift && state.data.shift.on_shift && state.data.shift.my_owed > 0
+          ? el('button', { class: 'btn btn--tile', onclick: go('take_pay') }, [icon('wallet'), 'Взять зарплату · ' + money(state.data.shift.my_owed)]) : null,
         el('button', { class: 'btn btn--tile btn--wide', onclick: go('help') }, [icon('book'), 'Как пользоваться · поддержка'])
       ]),
       liteToggle(),
@@ -1379,7 +1382,7 @@
     var saved = store(CLOSE_KEY);
     var s = state.data.shift;
     if (saved && saved.shift_no === s.shift_no) state.close = saved;
-    else state.close = { shift_no: s.shift_no, step: 'inv', op_id: uuid(), counted: '', withdrawal: '', preview: null, facts: null };
+    else state.close = { shift_no: s.shift_no, step: 'mode', mode: null, op_id: uuid(), counted: '', withdrawal: '', preview: null, facts: null };
     if (state.close.step === 'inv' && s.inventory_done) state.close.step = 'exp';
     state.screen = 'close';
     render();
@@ -1406,17 +1409,40 @@
     return api({ action: 'post', kind: kind, op_id: opId || uuid(), payload: payload });
   }
   function stepTitle(n, text) {
-    return el('div', {}, [el('div', { class: 'muted', text: 'Закрытие смены · шаг ' + n + ' из 4' }), el('h1', { class: 'h1', text: text })]);
+    var cont = state.close && state.close.mode === 'continue'; // без инвентаризации — на один шаг короче
+    return el('div', {}, [el('div', { class: 'muted', text: (cont ? 'Закрытие и продолжение · шаг ' + (n - 1) + ' из 3' : 'Закрытие смены · шаг ' + n + ' из 4') }), el('h1', { class: 'h1', text: text })]);
   }
 
   function renderClose() {
     backButton(true);
     var c = state.close;
+    if (c.step === 'mode') return closeMode(c);
     if (c.step === 'inv') return closeInventory(c);
     if (c.step === 'exp') return closeExpenses(c);
     if (c.step === 'count') return closeCount(c);
     if (c.step === 'result') return closeResult(c);
     return closeDone(c);
+  }
+
+  // Шаг 0. Что дальше после закрытия: смена закончилась или те же люди продолжают (суточные смены, D42).
+  function closeMode(c) {
+    mainButton(null);
+    var s = state.data.shift;
+    var names = (s.florists || []).join(', ');
+    var pick = function (mode) {
+      c.mode = mode;
+      c.step = mode === 'continue' ? 'exp' : (s.inventory_done ? 'exp' : 'inv');
+      saveClose(); render(); window.scrollTo(0, 0);
+    };
+    var option = function (ic, head, text, mode, primary) {
+      return el('button', { class: 'card btn--tile' + (primary ? ' card--accent' : ''), style: 'font:inherit;color:inherit;cursor:pointer;text-align:left;width:100%', onclick: function () { pick(mode); } },
+        [icon(ic), el('b', { text: head }), el('div', { class: 'muted', text: text })]);
+    };
+    app.replaceChildren(
+      el('div', {}, [el('div', { class: 'muted', text: 'Закрытие смены' }), el('h1', { class: 'h1', text: 'Что дальше?' })]),
+      option('moon', 'Смена закончилась или передаю другому', 'Инвентаризация, расходы, пересчёт наличных, зарплата. Следующий человек сам откроет смену.', 'end', false),
+      option('refresh', 'Продолжаем те же сутки: ' + names, 'Закрыть и сразу открыть следующую. Без инвентаризации, пересчёт по желанию, зарплата копится до конца серии.', 'continue', true),
+      el('div', { class: 'muted center', text: 'Если в следующей смене другой состав, выберите первый вариант.' }));
   }
 
   // Шаг 1. Инвентаризация: расчёт по каждой позиции, флорист вводит факт или жмёт «Всё верно».
@@ -1489,32 +1515,60 @@
   function closeCount(c) {
     var input = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Например, 32 498', value: c.counted, 'aria-label': 'Наличные в кассе',
       oninput: function (e) { c.counted = e.target.value; saveClose(); upd(); } });
-    function upd() { mainButton(state.sending ? 'Считаем…' : 'Дальше', intOf(c.counted) !== null && !state.sending, next); }
-    function next() {
-      busy(api({ action: 'close_preview', counted: intOf(c.counted), close_withdrawal: 0 })).then(function (pv) {
+    function upd() { mainButton(state.sending ? 'Считаем…' : 'Дальше', intOf(c.counted) !== null && !state.sending, function () { next(false); }); }
+    function next(skip) {
+      c.counted_skip = skip === true;
+      busy(api(previewBody(c, skip === true))).then(function (pv) {
         if (!pv) return;
-        c.preview = pv; c.counted_sent = intOf(c.counted); goStep('result');
+        c.preview = pv; c.counted_sent = skip === true ? null : intOf(c.counted); goStep('result');
       });
     }
     app.replaceChildren(stepTitle(3, 'Пересчёт наличных'),
       el('div', { class: 'card card--note' }, [el('div', { text: 'Пересчитайте все наличные в кассе, включая размен, и впишите сумму. Сколько должно быть — бот покажет после.' })]),
-      el('div', { class: 'field' }, [el('label', { text: 'Наличные в кассе' }), input]));
+      el('div', { class: 'field' }, [el('label', { text: 'Наличные в кассе' }), input]),
+      c.mode === 'continue' ? el('button', { class: 'btn', disabled: state.sending, onclick: function () { next(true); } }, ['Пропустить пересчёт (посчитаем при закрытии серии)']) : null);
     upd();
     setTimeout(function () { input.focus(); }, 50);
   }
 
   // Шаг 4. Расхождение, зарплата, изъятие и закрытие.
+  /** Тело запроса предпросмотра закрытия: в продолжении — состав следующих суток и признак «зарплата копится». */
+  function previewBody(c, skip) {
+    var body = { action: 'close_preview', close_withdrawal: 0 };
+    if (!skip) body.counted = intOf(c.counted);
+    if (c.mode === 'continue') { body.continue_with = state.data.shift.florist_ids; body.defer_pay = c.defer !== false; }
+    return body;
+  }
+
   function closeResult(c) {
     var pv = c.preview;
-    var counted = c.counted_sent;
+    var cont = c.mode === 'continue';
+    var counted = pv.counted !== undefined ? pv.counted : c.counted_sent;
     var paid = pv.payroll.reduce(function (s, p) { return s + p.paid; }, 0);
-    var diffText = pv.cash_diff === 0 ? 'Касса сошлась' : (pv.cash_diff > 0 ? 'Излишек ' : 'Недостача ') + money(Math.abs(pv.cash_diff));
+    var diffText = pv.counted_skipped ? 'Пересчёт пропущен' : pv.cash_diff === 0 ? 'Касса сошлась' : (pv.cash_diff > 0 ? 'Излишек ' : 'Недостача ') + money(Math.abs(pv.cash_diff));
     var pay = pv.payroll.map(function (p) {
+      if (pv.pay_deferred) {
+        return el('div', {}, [
+          el('div', { class: 'sum' }, [el('span', { text: p.name }), el('span', { class: 'big num copper', text: money(p.due) })]),
+          el('div', { class: 'muted', text: 'начислено за сутки, копится до конца серии' })
+        ]);
+      }
       return el('div', {}, [
         el('div', { class: 'sum' }, [el('span', { text: p.name }), el('span', { class: 'big num copper', text: money(p.paid) })]),
+        p.carried > 0 ? el('div', { class: 'muted num', text: 'за эти сутки ' + money(p.due) + ' + накопленное ' + money(p.carried) }) : null,
         p.unpaid ? el('div', { class: 'error', text: 'Не хватило наличных — к доплате ' + money(p.unpaid) + ' (владелица увидит в отчёте)' }) : null
       ]);
     });
+    var payModeBox = !cont ? null : el('div', { class: 'card' }, [
+      el('div', { class: 'muted', text: 'Зарплата за эти сутки' }),
+      el('div', { class: 'chips chips--wrap' }, [[true, 'Копить до конца серии'], [false, 'Выдать сейчас']].map(function (t) {
+        return el('button', { class: 'chip', 'aria-pressed': String((c.defer !== false) === t[0]), disabled: state.sending, onclick: function () {
+          if ((c.defer !== false) === t[0]) return;
+          c.defer = t[0]; saveClose();
+          busy(api(previewBody(c, c.counted_skip === true))).then(function (npv) { if (npv) { c.preview = npv; render(); } });
+        } }, [t[1]]);
+      }))
+    ]);
     var hint = el('div', {});
     var wInput = el('input', { class: 'input num', inputmode: 'numeric', placeholder: '0', value: c.withdrawal,
       oninput: function (e) { c.withdrawal = e.target.value; saveClose(); upd(); } });
@@ -1524,15 +1578,19 @@
       var bad = w === null || w > pv.max_withdrawal;
       hint.replaceChildren(bad
         ? el('div', { class: 'error', text: w === null ? 'Сумма цифрами' : 'Больше, чем есть в кассе после зарплаты (' + money(pv.max_withdrawal) + ')' })
-        : el('div', { class: 'sum' }, [el('span', { text: 'Останется на следующую смену' }), el('span', { class: 'num', text: money(counted - paid - w) })]));
-      mainButton(state.sending ? 'Закрываем…' : 'Закрыть смену', !bad && !state.sending, submitClose);
+        : el('div', { class: 'sum' }, [el('span', { text: cont ? 'Перейдёт в следующие сутки' : 'Останется на следующую смену' }), el('span', { class: 'num', text: money(counted - paid - w) })]));
+      mainButton(state.sending ? 'Закрываем…' : (cont ? 'Закрыть и открыть следующую' : 'Закрыть смену'), !bad && !state.sending, submitClose);
     }
     function submitClose() {
       var w = withdrawal();
-      busy(postOp('close_shift', { counted: counted, close_withdrawal: w || 0, expenses_confirmed: true }, c.op_id)).then(function (res) {
+      var payload = { close_withdrawal: w || 0, expenses_confirmed: true };
+      if (!pv.counted_skipped) payload.counted = counted;
+      if (cont) { payload.continue_with = state.data.shift.florist_ids; payload.defer_pay = pv.pay_deferred === true; }
+      busy(postOp('close_shift', payload, c.op_id)).then(function (res) {
         if (!res) return;
         haptic('success');
-        c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no, clean: res.result.cash_diff === 0 };
+        c.done = { next_cash: res.result.next_cash, shift_no: res.result.shift_no, clean: res.result.cash_diff === 0 && !res.result.counted_skipped,
+          next_shift_no: res.result.next_shift ? res.result.next_shift.shift_no : null };
         if (res.result.cash_diff === 0) setTimeout(petalBurst, 250);
         setData(res.state, true);
         goStep('done');
@@ -1540,10 +1598,11 @@
     }
     app.replaceChildren(stepTitle(4, 'Итог смены'),
       el('div', { class: 'card ' + (pv.cash_diff === 0 ? '' : 'card--note') }, [
-        el('div', { class: 'big', text: diffText, style: 'color:' + (pv.cash_diff < 0 ? 'var(--danger)' : 'var(--ok)') }),
-        el('div', { class: 'muted num', text: 'Пересчитано: ' + money(counted) })
+        el('div', { class: 'big', text: diffText, style: pv.counted_skipped ? '' : 'color:' + (pv.cash_diff < 0 ? 'var(--danger)' : 'var(--ok)') }),
+        el('div', { class: 'muted num', text: pv.counted_skipped ? 'Деньги посчитаем при закрытии серии' : 'Пересчитано: ' + money(counted) })
       ]),
-      el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Возьмите из кассы зарплату:' })].concat(pay)),
+      payModeBox,
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: pv.pay_deferred ? 'Зарплата (из кассы сейчас не берём):' : 'Возьмите из кассы зарплату:' })].concat(pay)),
       el('div', { class: 'card' }, [
         el('div', { class: 'muted', text: 'Владелица забирает сейчас (если нет — оставьте пустым)' }),
         wInput,
@@ -1559,8 +1618,9 @@
     app.replaceChildren(
       el('div', { class: 'card card--accent' }, [
         el('div', { class: 'big', text: 'Смена №' + c.done.shift_no + ' закрыта' }),
+        c.done.next_shift_no ? el('div', { class: 'big', text: 'Смена №' + c.done.next_shift_no + ' открыта' }) : null,
         c.done.clean ? el('div', { class: 'script', style: 'font-size:22px', text: 'Касса сошлась до тенге!' }) : null,
-        el('div', { class: 'muted num', text: 'Оставлено в кассе на следующую смену: ' + money(c.done.next_cash) })
+        el('div', { class: 'muted num', text: (c.done.next_shift_no ? 'Перешло в новую смену: ' : 'Оставлено в кассе на следующую смену: ') + money(c.done.next_cash) })
       ]),
       el('div', { class: 'muted center', text: 'Отчёт отправлен владелице.' }));
     mainButton('Готово', true, function () { state.close = null; state.screen = 'main'; render(); });
@@ -1755,6 +1815,32 @@
   };
 
   // ---------- расход, изъятие, погашение долга, отмена продажи ----------
+
+  // Накопленная зарплата суточной серии: взять из кассы по необходимости (D42). Владелица получает сообщение.
+  SCREENS.take_pay = function () {
+    backButton(true);
+    var s = state.data.shift;
+    var owed = s && s.my_owed || 0;
+    var f = state.form;
+    if (f.amount === undefined) f.amount = '';
+    var amount = intOf(f.amount);
+    var ok = !!s && owed > 0 && amount !== null && amount > 0 && amount <= owed;
+    mainButton(state.sending ? 'Записываем…' : 'Взять' + (amount ? ' ' + money(amount) : '') + ' из кассы', ok && !state.sending, function () {
+      askOk('Записать, что вы взяли из кассы ' + money(amount) + ' накопленной зарплаты? Владелица получит сообщение.', function () {
+        submitOp('pay_adjust', { staff_id: state.data.me.staff_id, amount: amount, comment: 'накопленная ЗП, взяла по необходимости' }, 'Записано: возьмите из кассы ' + money(amount));
+      });
+    });
+    app.replaceChildren(
+      title('Взять зарплату', 'Накопленное за закрытые сутки'),
+      el('div', { class: 'card' }, [
+        el('div', { class: 'sum' }, [el('span', { text: 'Накоплено к выдаче' }), el('span', { class: 'big num copper', text: money(owed) })]),
+        el('div', { class: 'muted', text: 'Остальное вы получите при закрытии серии.' })
+      ]),
+      formField('Сколько взять, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, placeholder: 'не больше ' + money(owed),
+        oninput: function (e) { f.amount = e.target.value; render(); } }),
+        amount !== null && amount > owed ? 'Больше, чем накоплено' : null)
+    );
+  };
 
   SCREENS.cashout = function () {
     backButton(true);

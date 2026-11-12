@@ -45,7 +45,7 @@ var Reports = (function () {
     L.push('');
     L.push('<b>КАССА</b>');
     var start = 'на начало ' + money(r.open_cash) + (r.open_diff ? ' (расхождение при приёме ' + money(r.open_diff) + ')' : '');
-    L.push('  ' + start + ' → расчёт ' + money(r.calc_cash) + ' → пересчёт ' + money(r.counted_cash));
+    L.push('  ' + start + ' → расчёт ' + money(r.calc_cash) + (r.counted_skipped ? ' (пересчёт не делали: суточная смена, считают при закрытии серии)' : ' → пересчёт ' + money(r.counted_cash)));
     var diffWord = r.cash_diff > 0 ? ' (излишек)' : r.cash_diff < 0 ? ' (недостача)' : '';
     L.push('  <b>РАСХОЖДЕНИЕ: ' + money(r.cash_diff) + diffWord + '</b>');
     L.push('  остаток на следующую смену (после ЗП и изъятия): ' + money(r.next_cash));
@@ -56,7 +56,9 @@ var Reports = (function () {
     r.payroll.forEach(function (p) {
       if (!p.total && !p.paid && !p.unpaid) return; // без оплаты (например, владелица в смене)
       var line = '  ' + person(p.staff_id) + ': ставка ' + money(p.rate) + ' + % ' + money(p.pct) + ' = ' + money(p.total);
-      if (p.unpaid > 0) line += ' — <b>к доплате ' + money(p.unpaid) + '</b>';
+      if (r.pay_deferred) line += ' — <b>копится до конца серии (не выдана)</b>';
+      else if (p.unpaid > 0) line += ' — <b>к доплате ' + money(p.unpaid) + '</b>';
+      if (p.carry_paid > 0) line += ' · + выдано накопленное ' + money(p.carry_paid);
       if (p.unpaid < 0) line += ' — <b>переплачено ' + money(-p.unpaid) + '</b> (решает владелица)';
       L.push(line);
     });

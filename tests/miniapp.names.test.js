@@ -18,7 +18,7 @@ test('все экраны кассы на месте (защита от случ
   const screens = ['stock', 'more', 'income', 'defect', 'refund', 'cancel', 'cashout', 'withdraw', 'repay', 'preorders', 'schedule', 'owner_day', 'open',
     'owner_today', 'owner_shift', 'owner_period', 'owner_debtors', 'owner_manage', 'owner_catalog', 'owner_typical', 'owner_item', 'owner_item_new', 'owner_import',
     'owner_team', 'owner_staff', 'owner_staff_new', 'owner_invite', 'owner_expenses', 'owner_settings', 'owner_work', 'owner_start_stock', 'owner_start_debt',
-    'owner_preorders', 'owner_preorder'];
+    'owner_preorders', 'owner_preorder', 'take_pay'];
   const lost = screens.filter((n) => !new RegExp('SCREENS(_EARLY)?\.' + n + ' = function').test(src));
   assert.deepEqual(lost, []);
   const helpers = ['positionsWord', 'parseImport', 'dayLabel', 'pctBp', 'signedInt', 'liteToggle', 'prefetchOwner', 'draftGet', 'askOk', 'formField', 'ocRead', 'drawCatalogAdd'];

@@ -142,7 +142,7 @@ test('закрытие через кассу: инвентаризация → �
   // Пересчёт: 20 450 при расчёте 15 000 + 6 000 − 500 = 20 500 → недостача 50.
   const pv = MiniApi.dispatch(store, 777, { action: 'close_preview', counted: 20450 }, now).data;
   assert.equal(pv.cash_diff, -50);
-  assert.deepEqual(pv.payroll, [{ name: 'Анна', due: 5180, paid: 5180, unpaid: 0 }]);
+  assert.deepEqual(pv.payroll, [{ name: 'Анна', due: 5180, carried: 0, paid: 5180, unpaid: 0 }]);
   assert.equal(pv.can_take_above_change_fund, 20450 - 5180 - 5000);
   assert.equal(pv.max_withdrawal, 20450 - 5180);
   assert.equal(store.tables.shifts[0].status, 'open', 'предпросмотр ничего не пишет');

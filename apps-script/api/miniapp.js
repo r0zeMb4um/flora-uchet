@@ -13,7 +13,7 @@ var MiniApi = (function () {
     sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
     preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
     inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true,
-    debt_repay: true, cancel: true, open_shift: true
+    debt_repay: true, cancel: true, open_shift: true, pay_adjust: true
   };
 
   function apiError(code, message) {
@@ -45,6 +45,8 @@ var MiniApi = (function () {
         shift_no: shift.shift_no,
         opened_at: shift.opened_at,
         florists: rep.florists,
+        florist_ids: String(shift.florist_ids || '').split(',').filter(Boolean),
+        my_owed: staff.role === 'florist' ? Math.max(0, Ops.salaryOwed(view, staff.staff_id)) : 0, // накопленная ЗП за закрытые смены: можно взять из кассы
         on_shift: !!mine,
         revenue: rep.revenue,
         receipts_count: rep.receipts_count,
@@ -115,7 +117,7 @@ var MiniApi = (function () {
         .map(function (e) { return staffNames[e.staff_id] || ''; }).filter(Boolean) };
     }
     var ownerWork = staff.role === 'owner' ? { works: staff.works_shifts === true, shift_rate: staff.shift_rate || 0, pct_bp: staff.pct_bp || 0 } : null;
-    return { me: { name: staff.name, role: staff.role }, owner_work: ownerWork, shop: { name: client.name || 'Флора·Учёт' }, next_shift: nextShift,
+    return { me: { name: staff.name, role: staff.role, staff_id: staff.staff_id }, owner_work: ownerWork, shop: { name: client.name || 'Флора·Учёт' }, next_shift: nextShift,
       shift: shiftInfo, open_info: openInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
@@ -361,16 +363,17 @@ var MiniApi = (function () {
       if (staff.role !== 'florist' && !ownerWorks(staff)) throw apiError('FORBIDDEN', 'Смену закрывает флорист');
       var view = Ops.makeView(store, ctxOf(staff, now));
       var plan = Ops.build(view, 'close_shift', 'preview-' + staff.staff_id, {
-        counted: body.counted, close_withdrawal: body.close_withdrawal || 0, expenses_confirmed: true
+        counted: body.counted, close_withdrawal: body.close_withdrawal || 0, expenses_confirmed: true,
+        continue_with: body.continue_with, defer_pay: body.defer_pay
       });
       var names = {};
       view.rows('staff').forEach(function (s) { names[s.staff_id] = s.name; });
       var r = plan.result;
       return { data: {
         cash_diff: r.cash_diff, next_cash: r.next_cash, can_take_above_change_fund: r.can_take_above_change_fund,
-        max_withdrawal: r.max_withdrawal,
+        max_withdrawal: r.max_withdrawal, counted: r.counted, counted_skipped: r.counted_skipped, pay_deferred: r.pay_deferred,
         payroll: Object.keys(r.payroll_due).map(function (id) {
-          return { name: names[id] || id, due: r.payroll_due[id], paid: r.payroll_paid[id], unpaid: r.payroll_unpaid[id] };
+          return { name: names[id] || id, due: r.payroll_due[id], carried: r.payroll_carried[id], paid: r.payroll_paid[id], unpaid: r.payroll_unpaid[id] };
         })
       }, notify: [] };
     }

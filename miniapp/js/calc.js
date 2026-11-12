@@ -188,7 +188,7 @@ var Calc = (function () {
   // Расходы из кассы, которые идут в «расчёт кассы» (до пересчёта).
   var CASH_OUT_BEFORE_COUNT = { delivery: true, other: true, withdrawal_day: true, pay_adjust: true };
   // Выдаются после пересчёта и в расчёт не входят.
-  var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, withdrawal_close: true };
+  var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, pay_carry: true, withdrawal_close: true };
 
   var PAYMENT_METHODS = { cash: true, card: true };
 

@@ -24,7 +24,7 @@ var Schema = (function () {
     customers: cols('customer_id client_id name note phone phone_consent_at anonymized:b' + META),
     ops_log: cols('op_id client_id point_id shift_id kind actor_staff_id status created_at posted_at plan_json result_json'),
     shifts: cols('shift_id shift_no:n client_id point_id shift_date florist_ids opened_at closed_at prev_next_cash:n open_cash:n open_diff:n ' +
-      'calc_cash:n counted_cash:n cash_diff:n payroll_total:n payroll_unpaid:n close_withdrawal:n next_cash:n status' + META),
+      'calc_cash:n counted_cash:n cash_diff:n payroll_total:n payroll_unpaid:n close_withdrawal:n next_cash:n status' + META + ' counted_skipped:b pay_deferred:b'),
     shift_staff: cols('shift_id staff_id client_id point_id shift_rate:n pct_bp:n' + META),
     receipts: cols('receipt_id receipt_no:n client_id point_id shift_id type price:n discount_kind discount_value:n discount_amount:n ' +
       'total:n debt_amount:n customer_id pickup_date assembly_status status reservation_id created_by' + META),

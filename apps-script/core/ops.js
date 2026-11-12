@@ -713,9 +713,27 @@ var Ops = (function () {
       owed += C.payroll(n.pay_base, staff).each[staffId].total;
     });
     view.rows('cash_ops').forEach(function (o) {
-      if (o.staff_id === staffId && (o.type === 'rate' || o.type === 'pct' || o.type === 'pay_adjust')) owed -= o.amount;
+      if (o.staff_id === staffId && (o.type === 'rate' || o.type === 'pct' || o.type === 'pay_adjust' || o.type === 'pay_carry')) owed -= o.amount;
     });
     return owed;
+  }
+
+  /**
+   * Накопленная ЗП суточной серии (D42): начислено по закрытым сменам с «копится» минус всё выданное (накопленное и доплаты),
+   * но не больше общего долга по ЗП. Недовыплаты из-за нехватки наличных (D18) сюда не входят — их по-прежнему доплачивают отдельно.
+   */
+  function deferredOwed(view, staffId) {
+    var total = 0;
+    view.rows('shifts').forEach(function (sh) {
+      if (sh.status !== 'closed' || sh.pay_deferred !== true) return;
+      var staff = view.shiftStaff(sh.shift_id);
+      if (!staff.some(function (x) { return x.staff_id === staffId; })) return;
+      total += C.payroll(shiftNumbers(view, sh).pay_base, staff).each[staffId].total;
+    });
+    view.rows('cash_ops').forEach(function (o) {
+      if (o.staff_id === staffId && (o.type === 'pay_carry' || o.type === 'pay_adjust')) total -= o.amount;
+    });
+    return Math.min(Math.max(0, total), Math.max(0, salaryOwed(view, staffId)));
   }
 
   /**
@@ -786,41 +804,88 @@ var Ops = (function () {
 
   H.close_shift = function (view, p, plan) {
     var shift = requireShift(view, plan);
+    var staff = view.shiftStaff(shift.shift_id);
+    // Суточные смены (D42): «закрыть и открыть следующую» с теми же людьми. Для этого можно без инвентаризации,
+    // без обязательного пересчёта наличных, а зарплата копится до конца серии.
+    var cont = Array.isArray(p.continue_with) && p.continue_with.length ? p.continue_with : null;
+    if (cont) {
+      var cur = staff.map(function (s) { return s.staff_id; }).sort().join(',');
+      var nxt = cont.slice().sort().join(',');
+      if (cur !== nxt) throw opsError('NOT_SAME_STAFF', 'Продолжить можно только теми же людьми. Если состав меняется, закройте смену обычно: следующий откроет свою.');
+    }
     var inventoried = view.rows('ops_log').some(function (o) { return o.kind === 'inventory' && o.shift_id === shift.shift_id; });
-    if (!inventoried) throw opsError('INVENTORY_REQUIRED', 'Сначала инвентаризация: шаг 1 закрытия смены');
+    if (!inventoried && !cont) throw opsError('INVENTORY_REQUIRED', 'Сначала инвентаризация: шаг 1 закрытия смены');
     if (p.expenses_confirmed !== true) throw opsError('CONFIRM_EXPENSES', 'Подтвердите, что все доставки, расходы и изъятия внесены');
     var n = shiftNumbers(view, shift);
-    var staff = view.shiftStaff(shift.shift_id);
     var pay = C.payroll(n.pay_base, staff);
+    var skipCount = !!cont && (p.counted === undefined || p.counted === null || p.counted === '');
+    var counted = skipCount ? n.calc_cash : nonNegInt(p.counted, 'пересчёт');
+    var defer = !!cont && p.defer_pay !== false; // при продолжении зарплата копится, если явно не просили выдать
     var due = {};
-    staff.forEach(function (s) { due[s.staff_id] = pay.each[s.staff_id].total; });
+    var carried = {};
+    var dueTotal = {};
+    var zeros = {};
+    staff.forEach(function (s) {
+      var id = s.staff_id;
+      due[id] = pay.each[id].total;
+      carried[id] = defer ? 0 : deferredOwed(view, id); // накоплено за прошлые закрытые смены серии
+      dueTotal[id] = due[id] + carried[id];
+      zeros[id] = 0;
+    });
     var close = C.closeShift({
-      counted: nonNegInt(p.counted, 'пересчёт'), calc_cash: n.calc_cash, payroll_each: due,
+      counted: counted, calc_cash: n.calc_cash, payroll_each: defer ? zeros : dueTotal,
       change_fund: view.settings().change_fund, close_withdrawal: nonNegInt(p.close_withdrawal || 0, 'изъятие')
     });
+    var unpaidEach = {};
+    var unpaidSum = 0;
     staff.forEach(function (s) {
-      var paid = close.payroll_paid_each[s.staff_id];
-      var rate = Math.min(paid, pay.each[s.staff_id].rate);
-      var parts = [['rate', rate], ['pct', paid - rate]];
+      var id = s.staff_id;
+      var paid = close.payroll_paid_each[id];
+      var thisPart = Math.min(paid, due[id]); // сначала погашается эта смена, остальное — накопленное
+      var rate = Math.min(thisPart, pay.each[id].rate);
+      var parts = [['rate', rate], ['pct', thisPart - rate], ['pay_carry', paid - thisPart]];
       parts.forEach(function (pt) {
         if (pt[1] > 0) {
-          add(plan, view, 'cash_ops', { cash_id: nextId(plan, 'co'), shift_id: shift.shift_id, type: pt[0], amount: pt[1], staff_id: s.staff_id, comment: '' });
+          add(plan, view, 'cash_ops', { cash_id: nextId(plan, 'co'), shift_id: shift.shift_id, type: pt[0], amount: pt[1], staff_id: id,
+            comment: pt[0] === 'pay_carry' ? 'накопленная ЗП за прошлые смены' : '' });
         }
       });
+      unpaidEach[id] = due[id] - thisPart;
+      unpaidSum += unpaidEach[id];
     });
     if (p.close_withdrawal > 0) {
       add(plan, view, 'cash_ops', { cash_id: nextId(plan, 'co'), shift_id: shift.shift_id, type: 'withdrawal_close', amount: p.close_withdrawal, staff_id: '', comment: '' });
     }
     update(plan, 'shifts', { shift_id: shift.shift_id }, shift, {
-      closed_at: view.ctx.now, calc_cash: n.calc_cash, counted_cash: p.counted, cash_diff: close.cash_diff,
-      payroll_total: pay.total, payroll_unpaid: close.payroll_unpaid_total,
-      close_withdrawal: p.close_withdrawal || 0, next_cash: close.next_cash, status: 'closed'
+      closed_at: view.ctx.now, calc_cash: n.calc_cash, counted_cash: counted, cash_diff: close.cash_diff,
+      payroll_total: pay.total, payroll_unpaid: unpaidSum,
+      close_withdrawal: p.close_withdrawal || 0, next_cash: close.next_cash, status: 'closed',
+      counted_skipped: skipCount, pay_deferred: defer
     });
+    var nextShift = null;
+    if (cont) {
+      // Следующие сутки открываются сразу, в той же операции: деньги переходят как есть, расхождения при открытии нет.
+      var shifts = view.rows('shifts');
+      var newId = 'shn-' + plan.op_id;
+      add(plan, view, 'shifts', {
+        shift_id: newId, shift_no: shifts.length + 1, shift_date: view.ctx.now.slice(0, 10),
+        florist_ids: staff.map(function (s) { return s.staff_id; }).join(','), opened_at: view.ctx.now, closed_at: '',
+        prev_next_cash: close.next_cash, open_cash: close.next_cash, open_diff: 0,
+        calc_cash: '', counted_cash: '', cash_diff: '', payroll_total: '', payroll_unpaid: '',
+        close_withdrawal: '', next_cash: '', status: 'open'
+      });
+      staff.forEach(function (s) {
+        var cur2 = view.staff(s.staff_id) || s;
+        add(plan, view, 'shift_staff', { shift_id: newId, staff_id: s.staff_id, shift_rate: cur2.shift_rate, pct_bp: cur2.pct_bp });
+      });
+      nextShift = { shift_id: newId, shift_no: shifts.length + 1 };
+    }
     plan.notify.push({ to: 'owner', kind: 'shift_report', shift_id: shift.shift_id });
     plan.result = {
       shift_id: shift.shift_id, shift_no: shift.shift_no, cash_diff: close.cash_diff, next_cash: close.next_cash,
-      payroll_due: due, payroll_paid: close.payroll_paid_each, payroll_unpaid: close.payroll_unpaid_each,
-      can_take_above_change_fund: close.can_take_above_change_fund, max_withdrawal: p.counted - close.payroll_paid_total
+      payroll_due: due, payroll_carried: carried, payroll_paid: close.payroll_paid_each, payroll_unpaid: unpaidEach,
+      can_take_above_change_fund: close.can_take_above_change_fund, max_withdrawal: counted - close.payroll_paid_total,
+      counted: counted, counted_skipped: skipCount, pay_deferred: defer, next_shift: nextShift
     };
   };
 
@@ -1232,8 +1297,11 @@ var Ops = (function () {
       card_total: n.card_total,
       payroll: staff.map(function (s) {
         var e = pay.each[s.staff_id];
-        return { staff_id: s.staff_id, rate: e.rate, pct: e.pct, total: e.total, paid: paidBy(s.staff_id), unpaid: e.total - paidBy(s.staff_id) };
+        var carry = sumWhere(n.cash_ops, function (o) { return o.staff_id === s.staff_id && o.type === 'pay_carry'; });
+        return { staff_id: s.staff_id, rate: e.rate, pct: e.pct, total: e.total, paid: paidBy(s.staff_id), unpaid: e.total - paidBy(s.staff_id), carry_paid: carry };
       }),
+      counted_skipped: shift.counted_skipped === true,
+      pay_deferred: shift.pay_deferred === true,
       delivery: sumWhere(n.cash_ops, function (o) { return o.type === 'delivery'; }),
       other: sumWhere(n.cash_ops, function (o) { return o.type === 'other'; }),
       pay_adjust: sumWhere(n.cash_ops, function (o) { return o.type === 'pay_adjust'; }),
@@ -1256,6 +1324,7 @@ var Ops = (function () {
     makeView: makeView,
     build: build,
     shiftReport: shiftReport,
+    salaryOwed: salaryOwed,
     POINT_SHEETS: POINT_SHEETS
   };
 })();
