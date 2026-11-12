@@ -65,3 +65,14 @@ test('чистка с именем владелицы: остаётся одна
   assert.deepEqual(same.keepStaff.map((s) => s.staff_id), ['own-1', 'own-2']);
   assert.deepEqual(same.keepInvites.map((i) => i.token), ['t1']);
 });
+
+test('напоминание для суточных смен (09:00): смена, открытая сегодня после 09:00, не «зависла»; вчерашняя ещё открытая — напоминаем', () => {
+  const today = { shift_id: 'sh2', status: 'open', opened_at: '2026-11-12T09:05:00+05:00' };
+  assert.equal(M.shouldRemind('2026-11-12T09:15:00+05:00', '09:00', today, null), false, 'открыли в 09:05 — не напоминаем в 09:15');
+  assert.equal(M.shouldRemind('2026-11-12T22:00:00+05:00', '09:00', today, null), false, 'и вечером того же дня');
+  assert.equal(M.shouldRemind('2026-11-13T09:00:00+05:00', '09:00', today, null), true, 'на следующее утро смена ещё открыта — напоминаем');
+  const early = { shift_id: 'sh3', status: 'open', opened_at: '2026-11-12T08:50:00+05:00' };
+  assert.equal(M.shouldRemind('2026-11-12T09:15:00+05:00', '09:00', early, null), true, 'открыта до времени напоминания — напоминаем как раньше');
+  const dayShift = { shift_id: 'sh4', status: 'open', opened_at: '2026-11-12T10:00:00+05:00' };
+  assert.equal(M.shouldRemind('2026-11-12T22:00:00+05:00', '22:00', dayShift, null), true, 'обычная дневная смена: как раньше');
+});

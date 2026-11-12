@@ -15,6 +15,10 @@ var Maintenance = (function () {
     var hhmm = String(nowIso).slice(11, 16);
     var rt = /^\d{2}:\d{2}$/.test(String(reminderTime || '')) ? reminderTime : '22:00';
     if (hhmm < rt) return false;
+    // Суточные смены: смена, открытая сегодня уже ПОСЛЕ времени напоминания, сегодня не «зависла» — не напоминаем
+    // (при напоминании 09:00 и открытии в 09:05 сообщения не будет; завтра в 09:00, если смена ещё открыта, — будет).
+    var opened = String(shift.opened_at || '');
+    if (opened.slice(0, 10) === String(nowIso).slice(0, 10) && opened.slice(11, 16) >= rt) return false;
     return alreadyRemindedKey !== reminderKey(nowIso, shift);
   }
   function reminderKey(nowIso, shift) { return shift.shift_id + '@' + String(nowIso).slice(0, 10); }
