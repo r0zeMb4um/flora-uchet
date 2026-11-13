@@ -45,7 +45,8 @@ var Reports = (function () {
     L.push('');
     L.push('<b>КАССА</b>');
     var start = 'на начало ' + money(r.open_cash) + (r.open_diff ? ' (расхождение при приёме ' + money(r.open_diff) + ')' : '');
-    L.push('  ' + start + ' → расчёт ' + money(r.calc_cash) + (r.counted_skipped ? ' (пересчёт не делали: суточная смена, считают при закрытии серии)' : ' → пересчёт ' + money(r.counted_cash)));
+    L.push('  ' + start + ' → расчёт ' + money(r.calc_cash) + (r.counted_skipped ? ' (пересчёт не делали: суточная смена, считают при закрытии серии)' : ' → пересчёт ' + money(r.counted_cash) +
+      (r.pay_taken_before ? ' (в кассе ' + money(r.counted_cash - r.pay_taken_before) + ' + зарплата, взятая до пересчёта, ' + money(r.pay_taken_before) + ')' : '')));
     var diffWord = r.cash_diff > 0 ? ' (излишек)' : r.cash_diff < 0 ? ' (недостача)' : '';
     L.push('  <b>РАСХОЖДЕНИЕ: ' + money(r.cash_diff) + diffWord + '</b>');
     L.push('  остаток на следующую смену (после ЗП и изъятия): ' + money(r.next_cash));

@@ -364,14 +364,15 @@ var MiniApi = (function () {
       var view = Ops.makeView(store, ctxOf(staff, now));
       var plan = Ops.build(view, 'close_shift', 'preview-' + staff.staff_id, {
         counted: body.counted, close_withdrawal: body.close_withdrawal || 0, expenses_confirmed: true,
-        continue_with: body.continue_with, defer_pay: body.defer_pay
+        continue_with: body.continue_with, defer_pay: body.defer_pay, pay_taken_before: body.pay_taken_before
       });
       var names = {};
       view.rows('staff').forEach(function (s) { names[s.staff_id] = s.name; });
       var r = plan.result;
       return { data: {
         cash_diff: r.cash_diff, next_cash: r.next_cash, can_take_above_change_fund: r.can_take_above_change_fund,
-        max_withdrawal: r.max_withdrawal, counted: r.counted, counted_skipped: r.counted_skipped, pay_deferred: r.pay_deferred,
+        max_withdrawal: r.max_withdrawal, counted: r.counted, counted_physical: r.counted_physical, pay_taken_before: r.pay_taken_before,
+        counted_skipped: r.counted_skipped, pay_deferred: r.pay_deferred,
         payroll: Object.keys(r.payroll_due).map(function (id) {
           return { name: names[id] || id, due: r.payroll_due[id], carried: r.payroll_carried[id], paid: r.payroll_paid[id], unpaid: r.payroll_unpaid[id] };
         })

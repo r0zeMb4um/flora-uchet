@@ -1515,7 +1515,10 @@
   function closeCount(c) {
     var input = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Например, 32 498', value: c.counted, 'aria-label': 'Наличные в кассе',
       oninput: function (e) { c.counted = e.target.value; saveClose(); upd(); } });
-    function upd() { mainButton(state.sending ? 'Считаем…' : 'Дальше', intOf(c.counted) !== null && !state.sending, function () { next(false); }); }
+    function upd() {
+      var preOk = !c.pre || intOf(c.pre) !== null;
+      mainButton(state.sending ? 'Считаем…' : 'Дальше', intOf(c.counted) !== null && preOk && !state.sending, function () { next(false); });
+    }
     function next(skip) {
       c.counted_skip = skip === true;
       busy(api(previewBody(c, skip === true))).then(function (pv) {
@@ -1523,9 +1526,14 @@
         c.preview = pv; c.counted_sent = skip === true ? null : intOf(c.counted); goStep('result');
       });
     }
+    var preInput = c.mode === 'continue' ? null : el('input', { class: 'input num', inputmode: 'numeric', placeholder: '0', value: c.pre || '', 'aria-label': 'Зарплату уже взяли до пересчёта',
+      oninput: function (e) { c.pre = e.target.value; saveClose(); upd(); } });
     app.replaceChildren(stepTitle(3, 'Пересчёт наличных'),
       el('div', { class: 'card card--note' }, [el('div', { text: 'Пересчитайте все наличные в кассе, включая размен, и впишите сумму. Сколько должно быть — бот покажет после.' })]),
+      c.mode === 'continue' ? null : el('div', { class: 'fielderr' }, [el('div', { class: 'error', text: '⚠️ Зарплату из кассы берите ПОСЛЕ пересчёта: на следующем шаге касса скажет, сколько взять.' })]),
       el('div', { class: 'field' }, [el('label', { text: 'Наличные в кассе' }), input]),
+      preInput ? formField('Уже взяли зарплату до пересчёта? Впишите сколько, ₸ (если нет — оставьте пустым)', preInput,
+        'Эти деньги засчитаются как выданная зарплата, и касса не покажет ложную недостачу.') : null,
       c.mode === 'continue' ? el('button', { class: 'btn', disabled: state.sending, onclick: function () { next(true); } }, ['Пропустить пересчёт (посчитаем при закрытии серии)']) : null);
     upd();
     setTimeout(function () { input.focus(); }, 50);
@@ -1536,6 +1544,7 @@
   function previewBody(c, skip) {
     var body = { action: 'close_preview', close_withdrawal: 0 };
     if (!skip) body.counted = intOf(c.counted);
+    if (!skip && c.mode !== 'continue' && c.pre && intOf(c.pre)) body.pay_taken_before = intOf(c.pre);
     if (c.mode === 'continue') { body.continue_with = state.data.shift.florist_ids; body.defer_pay = c.defer !== false; }
     return body;
   }
@@ -1584,7 +1593,8 @@
     function submitClose() {
       var w = withdrawal();
       var payload = { close_withdrawal: w || 0, expenses_confirmed: true };
-      if (!pv.counted_skipped) payload.counted = counted;
+      if (!pv.counted_skipped) payload.counted = pv.counted_physical !== undefined ? pv.counted_physical : counted;
+      if (pv.pay_taken_before) payload.pay_taken_before = pv.pay_taken_before;
       if (cont) { payload.continue_with = state.data.shift.florist_ids; payload.defer_pay = pv.pay_deferred === true; }
       busy(postOp('close_shift', payload, c.op_id)).then(function (res) {
         if (!res) return;
@@ -1599,10 +1609,15 @@
     app.replaceChildren(stepTitle(4, 'Итог смены'),
       el('div', { class: 'card ' + (pv.cash_diff === 0 ? '' : 'card--note') }, [
         el('div', { class: 'big', text: diffText, style: pv.counted_skipped ? '' : 'color:' + (pv.cash_diff < 0 ? 'var(--danger)' : 'var(--ok)') }),
-        el('div', { class: 'muted num', text: pv.counted_skipped ? 'Деньги посчитаем при закрытии серии' : 'Пересчитано: ' + money(counted) })
+        el('div', { class: 'muted num', text: pv.counted_skipped ? 'Деньги посчитаем при закрытии серии' : 'Пересчитано: ' + money(pv.counted_physical !== undefined ? pv.counted_physical : counted) +
+          (pv.pay_taken_before ? ' + взято до пересчёта ' + money(pv.pay_taken_before) : '') })
       ]),
       payModeBox,
-      el('div', { class: 'card' }, [el('div', { class: 'muted', text: pv.pay_deferred ? 'Зарплата (из кассы сейчас не берём):' : 'Возьмите из кассы зарплату:' })].concat(pay)),
+      el('div', { class: 'card' }, [el('div', { class: 'muted', text: pv.pay_deferred ? 'Зарплата (из кассы сейчас не берём):' : 'Зарплата по смене:' })].concat(pay).concat(
+        pv.pay_taken_before ? [
+          el('div', { class: 'sum' }, [el('span', { text: 'Уже взято до пересчёта' }), el('span', { class: 'num', text: '−' + money(pv.pay_taken_before) })]),
+          el('div', { class: 'sum' }, [el('b', { text: 'Возьмите сейчас' }), el('span', { class: 'big num copper', text: money(Math.max(0, paid - pv.pay_taken_before)) })])
+        ] : [])),
       el('div', { class: 'card' }, [
         el('div', { class: 'muted', text: 'Владелица забирает сейчас (если нет — оставьте пустым)' }),
         wInput,

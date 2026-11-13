@@ -165,3 +165,35 @@ test('отчёт владелице: суточная смена помечен�
   const t2 = Reports.shiftText(Ops.shiftReport(view(), id2), { items: {}, staff: { s_anna: 'Анна' } }).replace(/ /g, ' ');
   assert.ok(t2.includes('выдано накопленное 5 300 ₸'), t2);
 });
+
+// ---------- D43: зарплату взяли до пересчёта ----------
+
+test('зарплату взяли до пересчёта: недостачи нет, выдаётся только остаток, деньги на следующую смену верные', () => {
+  const { post, sell, call, view, cashOps, shifts } = shop();
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 10000 });
+  sell(777, 10000); // в кассе по расчёту 20 000, ЗП 5 300
+  const facts = Object.fromEntries(view().balance().map((b) => [b.item_id, b.qty]));
+  post(777, 'inventory', { facts });
+  // взяла 5 000 до пересчёта, в кассе осталось 15 000
+  const pv = call(777, { action: 'close_preview', counted: 15000, pay_taken_before: 5000, close_withdrawal: 0 });
+  assert.equal(pv.cash_diff, 0, 'ложной недостачи нет');
+  assert.equal(pv.counted_physical, 15000);
+  assert.equal(pv.payroll[0].paid, 5300);
+  const r = post(777, 'close_shift', { counted: 15000, pay_taken_before: 5000, expenses_confirmed: true });
+  assert.equal(r.data.result.cash_diff, 0);
+  assert.equal(r.data.result.next_cash, 14700, 'в кассе 15 000, взяла ещё 300');
+  assert.equal(cashOps('rate').reduce((a, o) => a + o.amount, 0) + cashOps('pct').reduce((a, o) => a + o.amount, 0), 5300, 'вся зарплата записана выданной');
+  assert.equal(shifts()[0].pay_taken_before, 5000);
+  const t = Reports.shiftText(Ops.shiftReport(view(), shifts()[0].shift_id), { items: {}, staff: { s_anna: 'Анна' } }).replace(/\u00a0/g, ' ');
+  assert.ok(t.includes('в кассе 15 000 ₸ + зарплата, взятая до пересчёта, 5 000 ₸'), t);
+});
+
+test('взяли до пересчёта больше зарплаты — отказ с понятным текстом; при накоплении — через «Взять зарплату»', () => {
+  const { post, sell, call, view } = shop();
+  post(777, 'open_shift', { florist_ids: [''], open_cash: 10000 });
+  sell(777, 10000);
+  assert.throws(() => post(777, 'close_shift', { continue_with: ['s_anna'], expenses_confirmed: true, counted: 15000, pay_taken_before: 5000 }), { code: 'BAD_INPUT' });
+  const facts = Object.fromEntries(view().balance().map((b) => [b.item_id, b.qty]));
+  post(777, 'inventory', { facts });
+  assert.throws(() => call(777, { action: 'close_preview', counted: 10000, pay_taken_before: 10000 }), { code: 'PRE_TAKEN_TOO_BIG' });
+});

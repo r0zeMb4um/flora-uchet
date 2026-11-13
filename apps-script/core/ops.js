@@ -821,6 +821,12 @@ var Ops = (function () {
     var skipCount = !!cont && (p.counted === undefined || p.counted === null || p.counted === '');
     var counted = skipCount ? n.calc_cash : nonNegInt(p.counted, 'пересчёт');
     var defer = !!cont && p.defer_pay !== false; // при продолжении зарплата копится, если явно не просили выдать
+    // D43: зарплату уже взяли из кассы ДО пересчёта. Эти деньги считаются как выданная зарплата:
+    // для расхождения к пересчёту прибавляем взятое, из выдачи при закрытии вычитаем.
+    var preTaken = p.pay_taken_before === undefined || p.pay_taken_before === null || p.pay_taken_before === '' ? 0 : nonNegInt(p.pay_taken_before, 'взято до пересчёта');
+    if (preTaken && (skipCount || defer)) throw opsError('BAD_INPUT', 'Когда зарплата копится, деньги из кассы берут через «Ещё» → «Взять зарплату»');
+    var physical = counted;
+    counted = counted + preTaken;
     var due = {};
     var carried = {};
     var dueTotal = {};
@@ -836,6 +842,9 @@ var Ops = (function () {
       counted: counted, calc_cash: n.calc_cash, payroll_each: defer ? zeros : dueTotal,
       change_fund: view.settings().change_fund, close_withdrawal: nonNegInt(p.close_withdrawal || 0, 'изъятие')
     });
+    if (preTaken > close.payroll_paid_total) {
+      throw opsError('PRE_TAKEN_TOO_BIG', 'Взято до пересчёта ' + tenge(preTaken) + ', а зарплата к выдаче ' + tenge(close.payroll_paid_total) + '. Разницу верните в кассу и впишите пересчёт заново.');
+    }
     var unpaidEach = {};
     var unpaidSum = 0;
     staff.forEach(function (s) {
@@ -860,7 +869,7 @@ var Ops = (function () {
       closed_at: view.ctx.now, calc_cash: n.calc_cash, counted_cash: counted, cash_diff: close.cash_diff,
       payroll_total: pay.total, payroll_unpaid: unpaidSum,
       close_withdrawal: p.close_withdrawal || 0, next_cash: close.next_cash, status: 'closed',
-      counted_skipped: skipCount, pay_deferred: defer
+      counted_skipped: skipCount, pay_deferred: defer, pay_taken_before: preTaken
     });
     var nextShift = null;
     if (cont) {
@@ -885,7 +894,7 @@ var Ops = (function () {
       shift_id: shift.shift_id, shift_no: shift.shift_no, cash_diff: close.cash_diff, next_cash: close.next_cash,
       payroll_due: due, payroll_carried: carried, payroll_paid: close.payroll_paid_each, payroll_unpaid: unpaidEach,
       can_take_above_change_fund: close.can_take_above_change_fund, max_withdrawal: counted - close.payroll_paid_total,
-      counted: counted, counted_skipped: skipCount, pay_deferred: defer, next_shift: nextShift
+      counted: counted, counted_physical: physical, pay_taken_before: preTaken, counted_skipped: skipCount, pay_deferred: defer, next_shift: nextShift
     };
   };
 
@@ -1302,6 +1311,7 @@ var Ops = (function () {
       }),
       counted_skipped: shift.counted_skipped === true,
       pay_deferred: shift.pay_deferred === true,
+      pay_taken_before: typeof shift.pay_taken_before === 'number' ? shift.pay_taken_before : 0,
       delivery: sumWhere(n.cash_ops, function (o) { return o.type === 'delivery'; }),
       other: sumWhere(n.cash_ops, function (o) { return o.type === 'other'; }),
       pay_adjust: sumWhere(n.cash_ops, function (o) { return o.type === 'pay_adjust'; }),
