@@ -1178,9 +1178,17 @@ var Ops = (function () {
       if (!items.length || items.some(function (x) { return x.length > 40; })) throw opsError('BAD_INPUT', 'Статьи через запятую, каждая до 40 символов');
       set.expense_items = items.join(';');
     }
-    if (!Object.keys(set).length) throw opsError('BAD_INPUT', 'Нечего менять');
-    update(plan, 'settings', { client_id: plan.client_id, point_id: plan.point_id }, st, set);
-    plan.result = { set: set };
+    // Название магазина (чеки картинкой, карточка дня, отчёты) — в карточке клиента.
+    var shopName = null;
+    if (p.shop_name !== undefined) {
+      shopName = text(p.shop_name, 'название магазина', 40);
+      var client = view.rows('clients')[0];
+      if (!client) throw opsError('BAD_INPUT', 'Нет карточки магазина');
+      update(plan, 'clients', { client_id: plan.client_id }, client, { name: shopName });
+    }
+    if (!Object.keys(set).length && shopName === null) throw opsError('BAD_INPUT', 'Нечего менять');
+    if (Object.keys(set).length) update(plan, 'settings', { client_id: plan.client_id, point_id: plan.point_id }, st, set);
+    plan.result = { set: set, shop_name: shopName };
   };
 
   // ---------- шаблоны букетов (быстрая продажа) ----------

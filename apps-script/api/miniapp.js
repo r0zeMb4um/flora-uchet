@@ -203,8 +203,10 @@ var MiniApi = (function () {
   }
 
   function ownerSettings(store, staff, now) {
-    var st = Ops.makeView(store, ctxOf(staff, now)).settings();
-    return { change_fund: st.change_fund, reminder_time: st.reminder_time || '22:00', expense_items: String(st.expense_items || '') };
+    var v = Ops.makeView(store, ctxOf(staff, now));
+    var st = v.settings();
+    var client = v.rows('clients')[0] || {};
+    return { shop_name: String(client.name || ''), change_fund: st.change_fund, reminder_time: st.reminder_time || '22:00', expense_items: String(st.expense_items || '') };
   }
 
   function requireOwnerStaff(staff) {

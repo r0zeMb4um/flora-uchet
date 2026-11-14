@@ -390,3 +390,14 @@ test('загрузка каталога: несколько категорий �
     { category: 'flowers', lines: [{ name: 'Тюльпан', sale_price: 400 }] }, { category: 'вещи', lines: [{ name: 'Z', sale_price: 1 }] }] }), { code: 'BAD_INPUT' });
   assert.ok(!call(1, { action: 'owner_catalog' }).some((c) => c.name === 'Тюльпан'), 'тюльпан не записался: пачка целиком отклонена');
 });
+
+test('название магазина меняет только владелица; попадает в кассу (чеки, карточка дня)', () => {
+  const { call, post } = shop();
+  assert.throws(() => post(777, 'settings_edit', { shop_name: 'Базилик' }), { code: 'FORBIDDEN' });
+  assert.throws(() => post(1, 'settings_edit', { shop_name: '  ' }), { code: 'BAD_INPUT' });
+  post(1, 'settings_edit', { shop_name: 'Базилик' });
+  assert.equal(call(1, { action: 'owner_settings' }).shop_name, 'Базилик');
+  assert.equal(call(777, { action: 'bootstrap' }).shop.name, 'Базилик');
+  post(1, 'settings_edit', { change_fund: 3000 }); // остальные настройки — как раньше
+  assert.equal(call(1, { action: 'owner_settings' }).change_fund, 3000);
+});

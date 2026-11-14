@@ -3277,18 +3277,21 @@
     backButton(true);
     var f = state.form;
     ownerLoad('owner_settings', {}, function (d) {
-      if (f.fund === undefined) { f.fund = String(d.change_fund); f.time = d.reminder_time; f.items = d.expense_items.split(';').join(', '); }
+      if (f.fund === undefined) { f.fund = String(d.change_fund); f.time = d.reminder_time; f.items = d.expense_items.split(';').join(', '); f.shop = d.shop_name || ''; }
       var fund = intOf(f.fund);
       var payload = {};
       if (fund !== null && fund !== d.change_fund) payload.change_fund = fund;
       if (/^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.time !== d.reminder_time) payload.reminder_time = f.time;
       if (f.items.trim() && f.items.trim() !== d.expense_items.split(';').join(', ')) payload.expense_items = f.items;
-      var valid = fund !== null && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.items.trim().length > 0;
+      if (f.shop.trim() && f.shop.trim() !== (d.shop_name || '')) payload.shop_name = f.shop.trim();
+      var valid = fund !== null && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.items.trim().length > 0 && f.shop.trim().length > 0;
       mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', valid && Object.keys(payload).length > 0 && !state.sending, function () {
         submitOp('settings_edit', payload, 'Настройки сохранены', function () { openScreen('owner_manage'); });
       });
       app.replaceChildren(
         title('Настройки', 'Для этой точки'),
+        formField('Название магазина', el('input', { class: 'input', value: f.shop, maxlength: '40', oninput: function (e) { f.shop = e.target.value; render(); } }),
+          'Печатается на чеке картинкой и карточке дня.'),
         formField('Размен в кассе, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.fund, oninput: function (e) { f.fund = e.target.value; render(); } }),
           'Эта сумма остаётся в кассе при закрытии смены.'),
         formField('Напомнить закрыть смену в', el('input', { class: 'input', type: 'time', value: f.time, oninput: function (e) { f.time = e.target.value; render(); } }),
