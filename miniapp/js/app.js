@@ -1122,7 +1122,8 @@
         el('button', { class: 'btn btn--tile', onclick: go('cancel') }, [icon('receipt-off'), 'Отмена продажи']),
         el('button', { class: 'btn btn--tile', onclick: go('cashout') }, [icon('cash-banknote'), 'Расход']),
         el('button', { class: 'btn btn--tile', onclick: go('repay') }, [icon('coin'), 'Погашение долга']),
-        el('button', { class: 'btn btn--tile btn--wide', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала из кассы'])
+        el('button', { class: 'btn btn--tile', onclick: go('withdraw') }, [icon('wallet'), 'Владелица забрала']),
+        el('button', { class: 'btn btn--tile', onclick: go('deposit') }, [icon('cash-banknote'), 'Владелица внесла'])
       ]),
       head('Смена'),
       el('div', { class: 'grid2' }, [
@@ -1496,17 +1497,20 @@
     var list = el('div', { class: 'card' }, [
       el('div', { class: 'sum' }, [el('span', { text: 'Доставка' }), el('span', { class: 'num', text: money(e.delivery) })]),
       el('div', { class: 'sum' }, [el('span', { text: 'Прочие расходы' }), el('span', { class: 'num', text: money(e.other) })]),
-      el('div', { class: 'sum' }, [el('span', { text: 'Владелица забрала' }), el('span', { class: 'num', text: money(e.withdrawal) })])
+      el('div', { class: 'sum' }, [el('span', { text: 'Владелица забрала' }), el('span', { class: 'num', text: money(e.withdrawal) })]),
+      el('div', { class: 'sum' }, [el('span', { text: 'Владелица внесла' }), el('span', { class: 'num', text: money(e.deposit || 0) })])
     ]);
-    var chips = el('div', { class: 'chips' }, [['delivery', 'Доставка'], ['other', 'Прочее'], ['withdrawal', 'Владелица забрала']].map(function (t) {
+    var chips = el('div', { class: 'chips' }, [['delivery', 'Доставка'], ['other', 'Прочее'], ['withdrawal', 'Владелица забрала'], ['deposit', 'Владелица внесла']].map(function (t) {
       return el('button', { class: 'chip', 'aria-pressed': String(form.type === t[0]), onclick: function () { form.type = t[0]; saveClose(); render(); } }, [t[1]]);
     }));
     var amount = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'Сумма', value: form.amount, oninput: function (ev) { form.amount = ev.target.value; saveClose(); } });
-    var comment = form.type === 'withdrawal' ? null : el('input', { class: 'search', placeholder: 'Комментарий (необязательно)', value: form.comment, oninput: function (ev) { form.comment = ev.target.value; saveClose(); } });
+    var comment = form.type === 'withdrawal' || form.type === 'deposit' ? null : el('input', { class: 'search', placeholder: 'Комментарий (необязательно)', value: form.comment, oninput: function (ev) { form.comment = ev.target.value; saveClose(); } });
     var add = el('button', { class: 'btn', disabled: state.sending, onclick: function () {
       var sum = intOf(form.amount);
       if (!sum) return toast('Введите сумму', true);
-      var op = form.type === 'withdrawal' ? postOp('withdrawal', { amount: sum }) : postOp('cash_out', { type: form.type, amount: sum, comment: form.comment });
+      var op = form.type === 'withdrawal' ? postOp('withdrawal', { amount: sum })
+        : form.type === 'deposit' ? postOp('deposit', { amount: sum })
+        : postOp('cash_out', { type: form.type, amount: sum, comment: form.comment });
       busy(op).then(function (res) {
         if (!res) return;
         setData(res.state, true);
@@ -1516,7 +1520,7 @@
       });
     } }, ['Добавить']);
     app.replaceChildren(stepTitle(2, 'Расходы и изъятия'),
-      el('div', { class: 'muted', text: 'Проверьте: все доставки, прочие расходы и деньги, которые забрала владелица, внесены?' }),
+      el('div', { class: 'muted', text: 'Проверьте: все доставки, прочие расходы, деньги, которые забрала или положила владелица, записаны?' }),
       list, el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'Добавить, если что-то забыли' }), chips, amount, comment, add]));
     mainButton(state.sending ? 'Проводим…' : 'Да, всё внесено', !state.sending, function () { goStep('count'); });
   }
@@ -1903,6 +1907,29 @@
       title('Владелица забрала', 'Деньги из кассы в течение смены'),
       formField('Сумма, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } }),
         'Владелица сразу получит сообщение об этом изъятии.')
+    );
+    upd();
+  };
+
+  /** Владелица положила деньги в кассу (D45): плюс к кассе, не выручка. Записывает флорист смены или сама владелица. */
+  SCREENS.deposit = function () {
+    backButton(true);
+    var f = state.form;
+    if (f.amount === undefined) { f.amount = ''; f.comment = ''; }
+    var isOwner = state.data && state.data.me && state.data.me.role === 'owner';
+    function upd() {
+      var a = intOf(f.amount);
+      mainButton(state.sending ? 'Записываем…' : 'Записать внесение' + (a ? ' ' + money(a) : ''), !!a && a > 0 && !state.sending, function () {
+        askOk('Записать, что ' + (isOwner ? 'вы положили' : 'владелица положила') + ' в кассу ' + money(a) + '?', function () {
+          submitOp('deposit', { amount: a, comment: f.comment.trim() }, 'Внесение записано', isOwner ? function () { openScreen('owner_today'); } : null);
+        });
+      });
+    }
+    app.replaceChildren(
+      title(isOwner ? 'Внести в кассу' : 'Владелица внесла', 'Деньги в кассу в течение смены, например на размен'),
+      formField('Сумма, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.amount, oninput: function (e) { f.amount = e.target.value; upd(); } })),
+      formField('Зачем (по желанию)', el('input', { class: 'input', value: f.comment, maxlength: '200', placeholder: 'например: на размен', oninput: function (e) { f.comment = e.target.value; } }),
+        'Это не продажа: деньги прибавятся к кассе, но не к выручке и не к проценту флориста. ' + (isOwner ? 'В отчёте смены будет строка «Внесено владелицей».' : 'Владелица получит сообщение.'))
     );
     upd();
   };
@@ -2327,6 +2354,7 @@
           el('div', { class: 'card' }, [el('div', { class: 'muted', text: 'В кассе по расчёту' }), numEl(r.calc_cash, true),
             el('div', { class: 'muted num', text: 'безнал ' + money(r.card_total) })])
         ]));
+        nodes.push(el('button', { class: 'btn', onclick: function () { openScreen('deposit'); } }, [icon('cash-banknote'), 'Внести деньги в кассу']));
         if (r.revenue) {
           nodes.push(el('div', { class: 'card' }, [donut([
             { label: 'Наличными', value: r.sales_cash, color: '#f07ca0' },
@@ -2340,6 +2368,7 @@
           r.discounts ? kv('Скидки', money(r.discounts)) : null,
           kv('Расходы (доставка + прочее)', money(r.delivery + r.other)),
           r.withdrawal ? kv('Изъято', money(r.withdrawal)) : null,
+          r.deposit ? kv('Внесено владелицей', money(r.deposit)) : null,
           r.defects.length ? kv('Брак (по закупке)', money(r.defects.reduce(function (a, x) { return a + x.cost; }, 0)), 'copper') : null
         ]));
       }
@@ -3447,6 +3476,7 @@
         el('div', { class: 'card' }, [
           kv('Скидки', money(s.discounts)),
           kv('Изъято владелицей', money(s.withdrawal)),
+          s.deposit ? kv('Внесено владелицей', money(s.deposit)) : null,
           kv('Склад: начало → конец', money(s.stock_value_start) + ' → ' + money(s.stock_value_end)),
           kv('Не получено: долги', money(s.not_received.debts) + (s.not_received.debts_old ? ' (старше 30 дн. ' + money(s.not_received.debts_old) + ')' : '')),
           kv('Предзаказы к доплате', money(s.not_received.preorders))

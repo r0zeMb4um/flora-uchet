@@ -278,6 +278,7 @@ var Notify = {
       return '⚠️ Расхождение при приёме смены: ' + Tg.money(n.open_diff) + '. Касса считается от принятой суммы.';
     }
     if (n.kind === 'withdrawal') return '💸 Из кассы забрали ' + Tg.money(n.amount) + ' (изъятие владелицей).';
+    if (n.kind === 'deposit') return '💵 В кассу внесли ' + Tg.money(n.amount) + ' (от владелицы)' + (n.comment ? ': ' + Tg.esc(n.comment) : '') + '.';
     if (n.kind === 'cancel') return '↩️ Отменён чек на ' + Tg.money(n.total) + '. Причина: ' + Tg.esc(n.reason);
     if (n.kind === 'refund') return '↩️ Возврат денег ' + Tg.money(n.amount) + ' по чеку №' + n.receipt_no + ' (чек на ' + Tg.money(n.total) + ').';
     if (n.kind === 'defect') return '🥀 Брак на ' + Tg.money(n.cost) + ' по закупке (' + n.qty + ' шт).';

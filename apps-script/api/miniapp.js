@@ -12,7 +12,7 @@ var MiniApi = (function () {
   var FLORIST_KINDS = {
     sale: true, bouquet: true, preorder: true, reserve: true, reserve_cancel: true,
     preorder_assemble: true, preorder_pickup: true, income: true, new_item: true, defect: true, refund: true,
-    inventory: true, cash_out: true, withdrawal: true, close_shift: true, template_save: true, template_hide: true,
+    inventory: true, cash_out: true, withdrawal: true, deposit: true, close_shift: true, template_save: true, template_hide: true,
     debt_repay: true, cancel: true, open_shift: true, pay_adjust: true
   };
 
@@ -53,7 +53,7 @@ var MiniApi = (function () {
         refunds: (rep.refunds_cash || 0) + (rep.refunds_card || 0), // возвраты за смену: флорист видит, что возврат записан (расчётную кассу — нет)
         my_pay: mine ? { rate: mine.rate, pct: mine.pct, total: mine.total } : null,
         inventory_done: view.rows('ops_log').some(function (o) { return o.kind === 'inventory' && o.shift_id === shift.shift_id; }),
-        expenses: { delivery: rep.delivery, other: rep.other, withdrawal: rep.withdrawal, pay_adjust: rep.pay_adjust }
+        expenses: { delivery: rep.delivery, other: rep.other, withdrawal: rep.withdrawal, deposit: rep.deposit, pay_adjust: rep.pay_adjust }
       };
     }
     var catalog = view.rows('catalog').filter(function (c) { return c.status !== 'hidden' && c.status !== 'deleted'; }).map(function (c) {
@@ -150,7 +150,8 @@ var MiniApi = (function () {
   var OWNER_KINDS = {
     correction: true, anonymize: true, catalog_edit: true, catalog_delete: true, new_item: true,
     staff_add: true, staff_invite: true, staff_edit: true, staff_set_active: true, owner_expense: true, settings_edit: true,
-    preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true, catalog_import: true
+    preorder_cancel: true, stock_start: true, debt_opening: true, schedule_set: true, owner_work_set: true, catalog_import: true,
+    deposit: true // владелица сама записывает, что положила деньги в кассу (D45), даже если не в смене
   };
 
   /** Владелица, которая выходит в смену, может делать то же, что флорист смены (D32). */

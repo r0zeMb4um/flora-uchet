@@ -135,7 +135,7 @@ test('закрытие через кассу: инвентаризация → �
   assert.throws(() => MiniApi.dispatch(store, 777, { action: 'close_preview', counted: 20500 }, now), { code: 'INVENTORY_REQUIRED' });
   const st = MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data;
   assert.equal(st.shift.inventory_done, false);
-  assert.deepEqual(st.shift.expenses, { delivery: 500, other: 0, withdrawal: 0, pay_adjust: 0 });
+  assert.deepEqual(st.shift.expenses, { delivery: 500, other: 0, withdrawal: 0, deposit: 0, pay_adjust: 0 });
   post('inventory', { facts: { rose: 35 } }, 'op-inv-0000001');
   assert.equal(MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.shift.inventory_done, true);
 
@@ -259,4 +259,40 @@ test('аналитика: прибыль по дням сходится со с�
   assert.equal(d.days.find((x) => x.date === '2026-11-07').revenue, 6000);
   assert.deepEqual(d.top.map((t) => [t.item_id, t.qty]), [['rose', 5]]);
   assert.deepEqual([d.prev.from, d.prev.to, d.prev.revenue], ['2026-10-25', '2026-10-31', 0]);
+});
+
+test('владелица внесла в кассу (D45): плюс к расчёту кассы, не выручка и не процент; записывают флорист или владелица', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const post = (tg, kind, payload) => MiniApi.dispatch(store, tg, { action: 'post', kind, op_id: 'op-dep-' + String(++n).padStart(6, '0'), payload }, now);
+  post(777, 'sale', { items: [{ item_id: 'rose', qty: 5 }], price: 6000, payments: [{ method: 'cash', amount: 6000 }] });
+  const r1 = post(777, 'deposit', { amount: 3000, comment: 'на размен' });
+  assert.deepEqual(r1.notify.map((x) => [x.kind, x.amount]), [['deposit', 3000]], 'владелица получает сообщение');
+  const r2 = post(1, 'deposit', { amount: 2000 }); // владелица сама, не будучи в смене
+  assert.deepEqual(r2.notify, [], 'себе владелица сообщение не шлёт');
+  assert.throws(() => post(777, 'deposit', { amount: 0 }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(777, 'deposit', { amount: -5 }), { code: 'BAD_INPUT' });
+  assert.equal(MiniApi.dispatch(store, 777, { action: 'bootstrap' }, now).data.shift.expenses.deposit, 5000);
+
+  const today = MiniApi.dispatch(store, 1, { action: 'owner_today' }, now).data.shift;
+  assert.equal(today.revenue, 6000, 'внесение — не выручка');
+  assert.equal(today.calc_cash, 15000 + 6000 + 3000 + 2000, 'расчёт кассы = начало + продажи + внесения');
+  assert.equal(today.deposit, 5000);
+  assert.ok(today.control.items.some((c) => c.kind === 'deposit' && /на размен/.test(c.text)), 'видно в контроле смены');
+
+  // Закрытие: пересчитали ровно расчёт — расхождения нет; процент только от продаж: 3% от 6000 = 180.
+  post(777, 'inventory', { facts: { rose: 35 } });
+  const pv = MiniApi.dispatch(store, 777, { action: 'close_preview', counted: 26000 }, now).data;
+  assert.equal(pv.cash_diff, 0);
+  assert.deepEqual(pv.payroll, [{ name: 'Анна', due: 5180, carried: 0, paid: 5180, unpaid: 0 }]);
+  const done = post(777, 'close_shift', { counted: 26000, close_withdrawal: 0, expenses_confirmed: true });
+  const rep = done.notify.find((x) => x.kind === 'shift_report');
+  assert.ok(rep, 'отчёт смены ушёл');
+  const view = Ops.makeView(store, { client_id: 'c1', point_id: 'p1', staff_id: 's_owner', role: 'owner', now });
+  const text = Reports.shiftText(Ops.shiftReport(view, rep.shift_id), { items: {}, staff: {} });
+  assert.match(text, /ВНЕСЕНО ВЛАДЕЛИЦЕЙ: 5 000/);
+  const per = Summary.period(view, '2026-11-07', '2026-11-07');
+  assert.equal(per.deposit, 5000);
+  assert.equal(per.revenue, 6000);
+  assert.throws(() => post(1, 'deposit', { amount: 1000 }), { code: 'NO_OPEN_SHIFT' }, 'без открытой смены внесение не записать');
 });

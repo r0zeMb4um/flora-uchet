@@ -66,6 +66,7 @@ var Reports = (function () {
     var exp = parts([['доставка', r.delivery], ['прочее', r.other], ['доплаты ЗП', r.pay_adjust]]);
     if (exp) L.push('РАСХОДЫ: ' + exp);
     if (r.withdrawal) L.push('ИЗЪЯТИЕ: ' + money(r.withdrawal));
+    if (r.deposit) L.push('ВНЕСЕНО ВЛАДЕЛИЦЕЙ: ' + money(r.deposit));
 
     if (r.control) {
       L.push('');
@@ -121,7 +122,7 @@ var Reports = (function () {
       ' · недостачи товара ' + money(s.losses.shortage) + ' · расхождения кассы ' + money(s.losses.cash_diff));
     var disc = Object.keys(s.discounts_by).map(function (k) { return person(k) + ' ' + money(s.discounts_by[k]); }).join(', ');
     L.push('Скидки ' + money(s.discounts) + (disc ? ' (' + disc + ')' : ''));
-    L.push('Изъято владелицей ' + money(s.withdrawal));
+    L.push('Изъято владелицей ' + money(s.withdrawal) + (s.deposit ? ' · внесено владелицей ' + money(s.deposit) : ''));
     L.push('Стоимость остатка на складе: на начало ' + money(s.stock_value_start) + ' · на конец ' + money(s.stock_value_end));
     L.push('Не получено: долги ' + money(s.not_received.debts) + ' (старше 30 дней ' + money(s.not_received.debts_old) +
       ') · предзаказы к доплате ' + money(s.not_received.preorders));

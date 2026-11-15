@@ -189,6 +189,8 @@ var Calc = (function () {
   var CASH_OUT_BEFORE_COUNT = { delivery: true, other: true, withdrawal_day: true, pay_adjust: true };
   // Выдаются после пересчёта и в расчёт не входят.
   var CASH_OUT_AFTER_COUNT = { rate: true, pct: true, pay_carry: true, withdrawal_close: true };
+  // Деньги, положенные в кассу владелицей в течение смены (D45): плюс к расчёту кассы, не выручка.
+  var CASH_IN = { deposit: true };
 
   var PAYMENT_METHODS = { cash: true, card: true };
 
@@ -211,7 +213,8 @@ var Calc = (function () {
 
   /**
    * Расчёт кассы = наличные на начало + оплаты наличными − возвраты наличными
-   *              − доставки − прочие расходы − изъятия в течение смены − доплаты ЗП (pay_adjust, D18).
+   *              − доставки − прочие расходы − изъятия в течение смены − доплаты ЗП (pay_adjust, D18)
+   *              + внесения владелицы (deposit, D45).
    * Аренды в смене нет (решение D11). ЗП и изъятие при закрытии — после пересчёта.
    * payments: [{ kind, method, amount }] — только неотменённые; cashOps: [{ type, amount }]
    */
@@ -219,13 +222,15 @@ var Calc = (function () {
     assertNonNegative(openCash, 'наличные на начало');
     var cash = splitPayments(payments, 'cash');
     var out = 0;
+    var dep = 0;
     for (var i = 0; i < cashOps.length; i++) {
       var op = cashOps[i];
-      assertPositive(op.amount, 'расход из кассы');
+      assertPositive(op.amount, 'сумма кассовой операции');
       if (CASH_OUT_BEFORE_COUNT[op.type]) out = assertInt(out + op.amount, 'расходы');
+      else if (CASH_IN[op.type]) dep = assertInt(dep + op.amount, 'внесения');
       else if (!CASH_OUT_AFTER_COUNT[op.type]) throw calcError('BAD_CASH_OP', 'Неизвестный тип расхода: ' + op.type);
     }
-    return assertInt(openCash + cash.in - cash.refund - out, 'расчёт кассы');
+    return assertInt(openCash + cash.in - cash.refund - out + dep, 'расчёт кассы');
   }
 
   /** Безнал за смену для сверки с Kaspi = оплаты безналом − возвраты безналом. */

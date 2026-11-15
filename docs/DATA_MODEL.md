@@ -241,8 +241,8 @@
 | --- | --- | --- |
 | cash_id, op_id | str | |
 | client_id, point_id, shift_id | str | |
-| type | enum | delivery / other / rate / pct / pay_adjust / withdrawal_day / withdrawal_close (аренды нет — D11) |
-| amount | int ₸ | > 0, всегда расход из кассы. До пересчёта (входят в расчёт кассы): delivery, other, withdrawal_day, pay_adjust. После пересчёта: rate, pct, withdrawal_close |
+| type | enum | delivery / other / rate / pct / pay_adjust / pay_carry / withdrawal_day / withdrawal_close / deposit (аренды нет — D11; deposit — D45) |
+| amount | int ₸ | > 0. Расход из кассы, кроме deposit. До пересчёта (входят в расчёт кассы): delivery, other, withdrawal_day, pay_adjust — минус; deposit (владелица положила деньги в кассу) — плюс. После пересчёта: rate, pct, pay_carry, withdrawal_close |
 | staff_id | str | для rate, pct и pay_adjust (доплата ЗП после исправления, D7) |
 | comment | str | |
 

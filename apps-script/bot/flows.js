@@ -22,6 +22,7 @@ var ChatFlows = (function () {
   var MENU = {
     'Расход': 'expense',
     'Владелица забрала': 'withdrawal',
+    'Владелица внесла': 'deposit',
     'Погашение долга': 'repay',
     'Отменить продажу': 'cancel',
     'Передать смену': 'handover',
@@ -87,6 +88,11 @@ var ChatFlows = (function () {
       st.step = 'amount';
       deps.state.set(st);
       return deps.send('Сколько забрала владелица? Напишите сумму цифрами, например: 10000', [CANCEL_ROW]);
+    }
+    if (flow === 'deposit') {
+      st.step = 'amount';
+      deps.state.set(st);
+      return deps.send('Сколько владелица положила в кассу? Напишите сумму цифрами, например: 3000', [CANCEL_ROW]);
     }
     if (flow === 'repay') {
       var debtors = view.rows('customers').filter(function (c) { return c.anonymized !== true; })
@@ -194,7 +200,7 @@ var ChatFlows = (function () {
         if (n > st.d.debt) return deps.send('Это больше долга (' + money(st.d.debt) + '). Напишите сумму не больше долга.');
         return askMethod(st, deps);
       }
-      return confirm(st, deps); // withdrawal
+      return confirm(st, deps); // withdrawal, deposit
     }
     if (st.step === 'comment') {
       st.d.comment = String(text).trim().slice(0, 200);
@@ -222,6 +228,7 @@ var ChatFlows = (function () {
     var d = st.d;
     if (st.flow === 'expense') return (d.type === 'delivery' ? 'Доставка' : 'Прочий расход') + ' из кассы: <b>' + money(d.amount) + '</b>' + (d.comment ? '\nКомментарий: ' + esc(d.comment) : '');
     if (st.flow === 'withdrawal') return 'Владелица забрала из кассы: <b>' + money(d.amount) + '</b>';
+    if (st.flow === 'deposit') return 'Владелица внесла в кассу: <b>' + money(d.amount) + '</b>\nЭто не выручка: деньги прибавятся к кассе, но не к продажам и не к проценту.';
     if (st.flow === 'repay') return 'Погашение долга: ' + esc(d.name) + ' — <b>' + money(d.amount) + '</b> ' + (d.method === 'card' ? 'безналом' : 'наличными') + '\nОстанется долг: ' + money(d.debt - d.amount);
     if (st.flow === 'cancel') return 'Отменить чек №' + d.receipt_no + ' на <b>' + money(d.total) + '</b>\nПричина: ' + esc(d.reason) + '\nТовар вернётся на склад, оплаты и долг по чеку аннулируются.';
     return Owner.summary(st);
@@ -239,6 +246,7 @@ var ChatFlows = (function () {
     var req;
     if (st.flow === 'expense') req = { kind: 'cash_out', payload: { type: d.type, amount: d.amount, comment: d.comment } };
     else if (st.flow === 'withdrawal') req = { kind: 'withdrawal', payload: { amount: d.amount } };
+    else if (st.flow === 'deposit') req = { kind: 'deposit', payload: { amount: d.amount } };
     else if (st.flow === 'repay') req = { kind: 'debt_repay', payload: { customer_id: d.customer_id, method: d.method, amount: d.amount } };
     else if (st.flow === 'cancel') req = { kind: 'cancel', payload: { receipt_id: d.receipt_id, reason: d.reason } };
     else if (OWNER_FLOWS[st.flow] && d.req) req = d.req;

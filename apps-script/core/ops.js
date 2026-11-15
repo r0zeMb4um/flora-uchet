@@ -658,6 +658,26 @@ var Ops = (function () {
     plan.result = { amount: p.amount };
   };
 
+  /** Владелица положила деньги в кассу (например, на размен) — D45. Плюс к расчёту кассы, не выручка и не процент. */
+  H.deposit = function (view, p, plan) {
+    // Записать может флорист смены или сама владелица (даже если она не в смене).
+    var isOwner = view.ctx.role === 'owner' || view.ctx.role === 'admin';
+    var shift;
+    if (isOwner) {
+      shift = view.openShift();
+      if (!shift) throw opsError('NO_OPEN_SHIFT', 'Смена не открыта. Внесите деньги, когда флорист откроет смену, — иначе при открытии будет расхождение.');
+      plan.shift_id = shift.shift_id;
+    } else shift = requireShift(view, plan);
+    var amount = posInt(p.amount, 'сумма');
+    var comment = optText(p.comment, 'комментарий', 200);
+    add(plan, view, 'cash_ops', {
+      cash_id: nextId(plan, 'co'), shift_id: shift.shift_id, type: 'deposit',
+      amount: amount, staff_id: '', comment: comment
+    });
+    if (!isOwner) plan.notify.push({ to: 'owner', kind: 'deposit', amount: amount, comment: comment });
+    plan.result = { amount: amount };
+  };
+
   /** Доплата ЗП из кассы в течение смены (D7, D18). */
   H.pay_adjust = function (view, p, plan) {
     var shift = requireShift(view, plan);
@@ -775,6 +795,7 @@ var Ops = (function () {
       else if (o.type === 'other') push('expense', 'Расход (прочее): ' + tenge(o.amount) + note, o.amount);
       else if (o.type === 'pay_adjust') push('pay_adjust', 'Доплата ЗП: ' + ((view.staff(o.staff_id) || {}).name || '') + ' ' + tenge(o.amount), o.amount);
       else if (o.type === 'withdrawal_day') push('withdrawal', 'Изъятие из кассы: ' + tenge(o.amount), o.amount);
+      else if (o.type === 'deposit') push('deposit', 'Владелица внесла в кассу: ' + tenge(o.amount) + note, o.amount);
     });
     view.rows('debt_moves').forEach(function (m) {
       if (m.shift_id !== shiftId || (m.type !== 'sale' && m.type !== 'pickup')) return;
@@ -1327,6 +1348,7 @@ var Ops = (function () {
       other: sumWhere(n.cash_ops, function (o) { return o.type === 'other'; }),
       pay_adjust: sumWhere(n.cash_ops, function (o) { return o.type === 'pay_adjust'; }),
       withdrawal: sumWhere(n.cash_ops, function (o) { return o.type === 'withdrawal_day' || o.type === 'withdrawal_close'; }),
+      deposit: sumWhere(n.cash_ops, function (o) { return o.type === 'deposit'; }),
       income: moves.filter(function (m) { return m.type === 'income'; })
         .map(function (m) { return { item_id: m.item_id, qty: m.qty, cost_sum: m.cost_sum }; }),
       defects: moves.filter(function (m) { return m.type === 'defect'; })

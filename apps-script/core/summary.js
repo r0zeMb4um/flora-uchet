@@ -92,6 +92,7 @@ var Summary = (function () {
     var delivery = sum(reports, function (r) { return r.delivery; });
     var other = sum(reports, function (r) { return r.other; });
     var withdrawal = sum(reports, function (r) { return r.withdrawal; });
+    var deposit = sum(reports, function (r) { return r.deposit || 0; }); // внесено владелицей в кассу (D45)
     var monthsIn = months(from, to);
     var ownerRows = view.rows('owner_expenses').filter(function (e) { return monthsIn.indexOf(e.month) >= 0; });
     var ownerByItem = {};
@@ -148,7 +149,7 @@ var Summary = (function () {
       owner_expenses: ownerTotal, owner_by_item: ownerByItem,
       profit: profit,
       losses: { defects: defects, replaces: replaceCost, shortage: shortage, cash_diff: cashDiff },
-      discounts: discounts, discounts_by: discBy, withdrawal: withdrawal,
+      discounts: discounts, discounts_by: discBy, withdrawal: withdrawal, deposit: deposit,
       stock_value_start: stockValue(view, stockAt(view, from)),
       stock_value_end: stockValue(view, stockAt(view, next)),
       not_received: { debts: debtTotal, debts_old: debtOld, preorders: preorderDue },
@@ -285,7 +286,7 @@ var Summary = (function () {
       ['Зарплата, ₸', s.payroll], ['Доставки, ₸', s.delivery], ['Прочие расходы, ₸', s.other], ['Возвраты, ₸', s.refunds],
       ['Расходы месяца (аренда и др.), ₸', s.owner_expenses], ['ПРИБЫЛЬ, ₸', s.profit],
       ['Брак по закупке, ₸', s.losses.defects], ['Замены, ₸', s.losses.replaces], ['Недостачи товара, ₸', s.losses.shortage],
-      ['Расхождения кассы, ₸', s.losses.cash_diff], ['Скидки, ₸', s.discounts], ['Изъято владелицей, ₸', s.withdrawal],
+      ['Расхождения кассы, ₸', s.losses.cash_diff], ['Скидки, ₸', s.discounts], ['Изъято владелицей, ₸', s.withdrawal], ['Внесено владелицей, ₸', s.deposit || 0],
       ['Долги (на сейчас), ₸', s.not_received.debts], ['Предзаказы к доплате (на сейчас), ₸', s.not_received.preorders]];
     var shiftRows = [['№ смены', 'Дата', 'Флористы', 'Выручка, ₸', 'Чеков', 'Нал, ₸', 'Безнал, ₸', 'В долг, ₸', 'Расхождение кассы, ₸', 'Статус']];
     var payRows = view.rows('payments');

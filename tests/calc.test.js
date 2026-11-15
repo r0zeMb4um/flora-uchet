@@ -439,3 +439,9 @@ test('не хватает на ЗП: один флорист, пустая ка�
   assert.deepEqual(r.payroll_paid_each, { a: 750, b: 250 });
   assert.throws(() => Calc.closeShift({ counted: 1, calc_cash: 0, payroll_each: {}, change_fund: 0 }), { code: 'BAD_FLORISTS_COUNT' });
 });
+
+test('расчёт кассы: внесение владелицы (deposit, D45) прибавляется, выручку не меняет', () => {
+  const pays = [{ kind: 'sale', method: 'cash', amount: 6000 }];
+  assert.equal(Calc.cashCalc(15000, pays, [{ type: 'deposit', amount: 3000 }, { type: 'delivery', amount: 500 }]), 15000 + 6000 + 3000 - 500);
+  assert.throws(() => Calc.cashCalc(0, [], [{ type: 'deposit', amount: 0 }]), { code: 'NOT_POSITIVE' });
+});
