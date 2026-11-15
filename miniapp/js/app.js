@@ -2457,7 +2457,7 @@
       ]),
       head('Настройки'),
       el('div', { class: 'grid2' }, [
-        tile('adjustments', 'Настройки', 'размен, напоминание', 'owner_settings'),
+        tile('adjustments', 'Настройки', 'название, адрес, размен', 'owner_settings'),
         tile('book', 'Как пользоваться', 'инструкция и поддержка', 'help')
       ]),
       liteToggle(),
@@ -3304,9 +3304,9 @@
         title('Настройки', 'Для этой точки'),
         formField('Название магазина', el('input', { class: 'input', value: f.shop, maxlength: '40', oninput: function (e) { f.shop = e.target.value; render(); } }),
           'Печатается на чеке картинкой и карточке дня.'),
-        formField('Адрес магазина', el('input', { class: 'input', value: f.addr, maxlength: '80', placeholder: 'ул. Абая 10, у входа в ТЦ', oninput: function (e) { f.addr = e.target.value; render(); } }),
+        formField('Адрес магазина', el('input', { class: 'input', value: f.addr, maxlength: '80', placeholder: 'например: ул. Абая 10, у входа в ТЦ', oninput: function (e) { f.addr = e.target.value; render(); } }),
           'Необязательно. Мелкой строкой под названием на чеке и карточке дня.'),
-        formField('Контакт магазина', el('input', { class: 'input', value: f.contact, maxlength: '60', placeholder: 'Instagram @flora или +7 700 000 00 00', oninput: function (e) { f.contact = e.target.value; render(); } }),
+        formField('Контакт магазина', el('input', { class: 'input', value: f.contact, maxlength: '60', placeholder: 'например: Instagram @flora', oninput: function (e) { f.contact = e.target.value; render(); } }),
           'Необязательно. Телефон, Instagram или WhatsApp магазина — чтобы покупатель мог заказать снова.'),
         formField('Размен в кассе, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.fund, oninput: function (e) { f.fund = e.target.value; render(); } }),
           'Эта сумма остаётся в кассе при закрытии смены.'),

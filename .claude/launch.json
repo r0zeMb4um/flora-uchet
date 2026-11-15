@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stand",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/stand.cjs"],
+      "port": 8766
+    }
+  ]
+}
