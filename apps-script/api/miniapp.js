@@ -117,7 +117,7 @@ var MiniApi = (function () {
         .map(function (e) { return staffNames[e.staff_id] || ''; }).filter(Boolean) };
     }
     var ownerWork = staff.role === 'owner' ? { works: staff.works_shifts === true, shift_rate: staff.shift_rate || 0, pct_bp: staff.pct_bp || 0 } : null;
-    return { me: { name: staff.name, role: staff.role, staff_id: staff.staff_id }, owner_work: ownerWork, shop: { name: client.name || 'Флора·Учёт' }, next_shift: nextShift,
+    return { me: { name: staff.name, role: staff.role, staff_id: staff.staff_id }, owner_work: ownerWork, shop: shopInfo(view, client), next_shift: nextShift,
       shift: shiftInfo, open_info: openInfo, catalog: catalog, templates: templates, hits: hits,
       customers: customers, preorders: preorders, reservations: reservations };
   }
@@ -206,7 +206,14 @@ var MiniApi = (function () {
     var v = Ops.makeView(store, ctxOf(staff, now));
     var st = v.settings();
     var client = v.rows('clients')[0] || {};
-    return { shop_name: String(client.name || ''), change_fund: st.change_fund, reminder_time: st.reminder_time || '22:00', expense_items: String(st.expense_items || '') };
+    return { shop_name: String(client.name || ''), shop_address: String(st.shop_address || ''), shop_contact: String(st.shop_contact || ''),
+      change_fund: st.change_fund, reminder_time: st.reminder_time || '22:00', expense_items: String(st.expense_items || '') };
+  }
+
+  /** Данные магазина для чека картинкой и карточки дня: название, адрес, контакт (D44). */
+  function shopInfo(view, client) {
+    var st = view.rows('settings')[0] || {};
+    return { name: client.name || 'Флора·Учёт', address: String(st.shop_address || ''), contact: String(st.shop_contact || '') };
   }
 
   function requireOwnerStaff(staff) {
@@ -232,7 +239,7 @@ var MiniApi = (function () {
     if (review) alerts.push('Новых позиций на проверке: ' + review + ' (чат → «Каталог»)');
     var yesterday = new Date(Date.parse(now.slice(0, 10) + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
     var client = store.rows('clients').filter(function (c) { return c.client_id === staff.client_id; })[0] || {};
-    return { me: { name: staff.name, role: staff.role }, shop: { name: client.name || 'Флора·Учёт' },
+    return { me: { name: staff.name, role: staff.role }, shop: shopInfo(view, client),
       shift: rep, names: names(view), below_min: st.below, restock: Summary.restock(view), alerts: alerts, yesterday: Summary.day(view, yesterday) };
   }
 

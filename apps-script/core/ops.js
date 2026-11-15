@@ -1163,7 +1163,7 @@ var Ops = (function () {
     plan.result = { items: rows.length, with_stock: rows.filter(function (r) { return r.qty > 0; }).length };
   };
 
-  /** Настройки точки (владелица): размен, время напоминания, статьи расходов месяца. */
+  /** Настройки точки (владелица): размен, время напоминания, статьи расходов месяца, название, адрес и контакт магазина. */
   H.settings_edit = function (view, p, plan) {
     requireOwner(view);
     var st = view.settings();
@@ -1178,6 +1178,9 @@ var Ops = (function () {
       if (!items.length || items.some(function (x) { return x.length > 40; })) throw opsError('BAD_INPUT', 'Статьи через запятую, каждая до 40 символов');
       set.expense_items = items.join(';');
     }
+    // Адрес и контакт магазина (D44) — мелкой строкой под названием на чеке и карточке дня. Пустая строка = убрать.
+    if (p.shop_address !== undefined) set.shop_address = optText(p.shop_address, 'адрес магазина', 80);
+    if (p.shop_contact !== undefined) set.shop_contact = optText(p.shop_contact, 'контакт магазина', 60);
     // Название магазина (чеки картинкой, карточка дня, отчёты) — в карточке клиента.
     var shopName = null;
     if (p.shop_name !== undefined) {

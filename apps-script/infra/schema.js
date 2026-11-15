@@ -17,7 +17,7 @@ var Schema = (function () {
   var SHEETS = {
     clients: cols('client_id name tariff paid_until timezone admin_finance_access:b' + META),
     points: cols('point_id client_id name address' + META),
-    settings: cols('client_id point_id change_fund:n reminder_time cash_tolerance:n expense_items' + META),
+    settings: cols('client_id point_id change_fund:n reminder_time cash_tolerance:n expense_items' + META + ' shop_address shop_contact'),
     catalog: cols('item_id client_id code category name unit sale_price:n last_cost:n min_stock:n status created_by' + META),
     staff: cols('staff_id client_id point_id telegram_id name role shift_rate:n pct_bp:n consent_at consent_version active:b' + META + ' works_shifts:b'),
     invites: cols('token client_id point_id staff_id expires_at status used_by_telegram_id' + META),

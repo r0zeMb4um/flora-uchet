@@ -401,3 +401,20 @@ test('название магазина меняет только владели
   post(1, 'settings_edit', { change_fund: 3000 }); // остальные настройки — как раньше
   assert.equal(call(1, { action: 'owner_settings' }).change_fund, 3000);
 });
+
+test('адрес и контакт магазина (D44): меняет только владелица, попадают в кассу, можно очистить, длина ограничена', () => {
+  const { call, post } = shop();
+  assert.equal(call(777, { action: 'bootstrap' }).shop.address, '', 'по умолчанию пусто — карточка как раньше');
+  assert.throws(() => post(777, 'settings_edit', { shop_address: 'ул. Абая 10' }), { code: 'FORBIDDEN' });
+  assert.throws(() => post(1, 'settings_edit', { shop_address: 'а'.repeat(81) }), { code: 'BAD_INPUT' });
+  assert.throws(() => post(1, 'settings_edit', { shop_contact: 'б'.repeat(61) }), { code: 'BAD_INPUT' });
+  post(1, 'settings_edit', { shop_address: '  ул. Абая 10, у входа в ТЦ ', shop_contact: 'Instagram @flora' });
+  const s = call(1, { action: 'owner_settings' });
+  assert.equal(s.shop_address, 'ул. Абая 10, у входа в ТЦ');
+  assert.equal(s.shop_contact, 'Instagram @flora');
+  assert.deepEqual(call(777, { action: 'bootstrap' }).shop, { name: s.shop_name || 'Флора·Учёт', address: 'ул. Абая 10, у входа в ТЦ', contact: 'Instagram @flora' });
+  assert.equal(call(1, { action: 'owner_today' }).shop.contact, 'Instagram @flora');
+  post(1, 'settings_edit', { shop_contact: '' }); // убрать контакт
+  assert.equal(call(1, { action: 'owner_settings' }).shop_contact, '');
+  assert.equal(call(1, { action: 'owner_settings' }).shop_address, 'ул. Абая 10, у входа в ТЦ', 'адрес не тронут');
+});

@@ -271,8 +271,10 @@
   var SANS = '{w} {px}px Manrope, Arial, sans-serif';
   function font(tpl, px, w) { return tpl.replace('{px}', px).replace('{w}', w || 600); }
 
-  /** Фон и шапка в фирменном стиле. Возвращает canvas и контекст. */
-  function brandCanvas(h, shopName, logo) {
+  /** Фон и шапка в фирменном стиле. shop — { name, address, contact } (или просто название). Возвращает canvas и контекст. */
+  function brandCanvas(h, shop, logo) {
+    if (typeof shop === 'string') shop = { name: shop };
+    shop = shop || {};
     var c = document.createElement('canvas');
     c.width = 1080; c.height = h;
     var g = c.getContext('2d');
@@ -286,9 +288,17 @@
     });
     g.drawImage(logo, 64, 52, 132, 132);
     g.fillStyle = '#fff'; g.font = font(SCRIPT, 76); g.textBaseline = 'alphabetic';
-    g.fillText(shopName, 214, 132);
-    g.font = font(SANS, 22, 600); g.globalAlpha = .85;
-    g.fillText('Ц В Е Т О Ч Н А Я   К А С С А', 218, 172); g.globalAlpha = 1;
+    g.fillText(fit(g, shop.name || 'Флора·Учёт', 820), 214, 132);
+    // Под названием — адрес и контакт магазина (D44); если их нет — прежняя подпись.
+    var info = [shop.address, shop.contact].map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+    g.globalAlpha = .85;
+    if (!info.length) {
+      g.font = font(SANS, 22, 600); g.fillText('Ц В Е Т О Ч Н А Я   К А С С А', 218, 172);
+    } else {
+      g.font = font(SANS, 26, 500);
+      info.forEach(function (t, i) { g.fillText(fit(g, t, 800), 218, 172 + i * 34); });
+    }
+    g.globalAlpha = 1;
     return { c: c, g: g };
   }
   function glass(g, x, y, w, h) {
@@ -2303,7 +2313,7 @@
           el('div', { class: 'muted', text: 'чеков ' + y.receipts + ' · ' + (!y.all_closed ? 'смена не закрыта' : cleanY ? 'касса сошлась' : 'расхождение ' + money(y.cash_diff)) +
             (y.top_item ? ' · лучшая позиция — ' + y.top_item.name : '') }),
           el('button', { class: 'btn', onclick: function () {
-            shareImage(function () { return drawDayCard(y, (d.shop && d.shop.name) || 'Флора·Учёт'); }, 'Карточка дня · ' + y.date.split('-').reverse().join('.'),
+            shareImage(function () { return drawDayCard(y, d.shop || 'Флора·Учёт'); }, 'Карточка дня · ' + y.date.split('-').reverse().join('.'),
               'Карточка дня пришла вам в чат — её можно переслать');
           } }, [icon('sparkles'), 'Карточка дня картинкой'])
         ]));
@@ -3277,13 +3287,15 @@
     backButton(true);
     var f = state.form;
     ownerLoad('owner_settings', {}, function (d) {
-      if (f.fund === undefined) { f.fund = String(d.change_fund); f.time = d.reminder_time; f.items = d.expense_items.split(';').join(', '); f.shop = d.shop_name || ''; }
+      if (f.fund === undefined) { f.fund = String(d.change_fund); f.time = d.reminder_time; f.items = d.expense_items.split(';').join(', '); f.shop = d.shop_name || ''; f.addr = d.shop_address || ''; f.contact = d.shop_contact || ''; }
       var fund = intOf(f.fund);
       var payload = {};
       if (fund !== null && fund !== d.change_fund) payload.change_fund = fund;
       if (/^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.time !== d.reminder_time) payload.reminder_time = f.time;
       if (f.items.trim() && f.items.trim() !== d.expense_items.split(';').join(', ')) payload.expense_items = f.items;
       if (f.shop.trim() && f.shop.trim() !== (d.shop_name || '')) payload.shop_name = f.shop.trim();
+      if (f.addr.trim() !== (d.shop_address || '')) payload.shop_address = f.addr.trim();
+      if (f.contact.trim() !== (d.shop_contact || '')) payload.shop_contact = f.contact.trim();
       var valid = fund !== null && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) && f.items.trim().length > 0 && f.shop.trim().length > 0;
       mainButton(state.sending ? 'Сохраняем…' : 'Сохранить', valid && Object.keys(payload).length > 0 && !state.sending, function () {
         submitOp('settings_edit', payload, 'Настройки сохранены', function () { openScreen('owner_manage'); });
@@ -3292,6 +3304,10 @@
         title('Настройки', 'Для этой точки'),
         formField('Название магазина', el('input', { class: 'input', value: f.shop, maxlength: '40', oninput: function (e) { f.shop = e.target.value; render(); } }),
           'Печатается на чеке картинкой и карточке дня.'),
+        formField('Адрес магазина', el('input', { class: 'input', value: f.addr, maxlength: '80', placeholder: 'ул. Абая 10, у входа в ТЦ', oninput: function (e) { f.addr = e.target.value; render(); } }),
+          'Необязательно. Мелкой строкой под названием на чеке и карточке дня.'),
+        formField('Контакт магазина', el('input', { class: 'input', value: f.contact, maxlength: '60', placeholder: 'Instagram @flora или +7 700 000 00 00', oninput: function (e) { f.contact = e.target.value; render(); } }),
+          'Необязательно. Телефон, Instagram или WhatsApp магазина — чтобы покупатель мог заказать снова.'),
         formField('Размен в кассе, ₸', el('input', { class: 'input num', inputmode: 'numeric', value: f.fund, oninput: function (e) { f.fund = e.target.value; render(); } }),
           'Эта сумма остаётся в кассе при закрытии смены.'),
         formField('Напомнить закрыть смену в', el('input', { class: 'input', type: 'time', value: f.time, oninput: function (e) { f.time = e.target.value; render(); } }),
@@ -3536,7 +3552,7 @@
       return;
     }
     state.lastSale = {
-      shop: (state.data.shop && state.data.shop.name) || 'Флора·Учёт', type: d.type, how: how, total: sm.total,
+      shop: state.data.shop || 'Флора·Учёт', type: d.type, how: how, total: sm.total,
       discount: sm.payload.price - sm.total,
       items: sm.payload.items.map(function (x) { return { name: nameOf(x.item_id), qty: x.qty }; }),
       when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16).replace('T', ' ').split(' ').map(function (v, i) { return i ? v : v.split('-').reverse().join('.'); }).join(' · ')
