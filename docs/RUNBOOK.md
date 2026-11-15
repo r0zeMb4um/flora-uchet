@@ -54,7 +54,7 @@ git push
 ## Если бот молчит
 1. В браузере: `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec?health=1` (ID — в `apps-script/config.js`). Должно быть `"webhook":{"connected":true,"pending":0,"error":""}`.
 2. `connected: false` или ошибка → запустить `connectBot`.
-3. `errors_logged` > 0 → лист `audit`, строки `error`: там текст ошибки.
+3. `errors_logged` > 0 (ошибки за последние 7 суток) → лист `audit`, строки `error`: там текст ошибки. `errors_total` — сколько всего за всё время (строки журнала не удаляются, поэтому это число только растёт).
 4. Google просит авторизацию (после изменения прав скрипта) → запустить любую функцию в редакторе и разрешить.
 
 ## Восстановление из копии (пробовать раз в месяц)

@@ -81,3 +81,16 @@ test('дата выдачи: настоящая дата календаря, н�
   assert.ok(pre('2027-11-08')); // ровно через год
   assert.throws(() => post(anna, 'reserve', { customer: { new_customer: { name: 'Б' } }, pickup_date: '2020-01-01', price: 1000 }), { code: 'BAD_INPUT' });
 });
+
+test('проверка здоровья: ошибки считаются за последние 7 суток, старые исправленные не висят вечно', () => {
+  const Summary = require('../apps-script/core/summary.js');
+  const rows = [
+    { ts: '2026-11-11T15:55:04+05:00', action: 'error' },   // старая (как 11.11, исправлена)
+    { ts: '2026-11-08T09:00:00+05:00', action: 'error' },   // ровно 7 суток назад — ещё считается
+    { ts: '2026-11-08T08:59:59+05:00', action: 'error' },   // чуть раньше — уже нет
+    { ts: '2026-11-15T08:00:00+05:00', action: 'error' },
+    { ts: '2026-11-15T08:00:00+05:00', action: 'invite' }   // не ошибка
+  ];
+  assert.equal(Summary.recentErrors(rows, '2026-11-15T09:00:00+05:00', 7), 3);
+  assert.equal(Summary.recentErrors(rows, '2026-11-25T09:00:00+05:00', 7), 0, 'через неделю без новых ошибок — ноль');
+});

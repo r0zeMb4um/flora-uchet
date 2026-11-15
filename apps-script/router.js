@@ -48,7 +48,10 @@ function health_() {
       out.someone_joined = store.rows('staff').some(function (s) { return !!s.telegram_id; });
       out.shift_opened = store.rows('shifts').length > 0;
       out.stock_ready = store.rows('stock_balance').length > 0;
-      out.errors_logged = store.rows('audit').filter(function (a) { return a.action === 'error'; }).length;
+      // Ошибки за последние 7 суток (при нормальной работе 0); всего за всё время — отдельно, для истории.
+      var audit = store.rows('audit');
+      out.errors_logged = Summary.recentErrors(audit, nowIso(), 7);
+      out.errors_total = audit.filter(function (a) { return a.action === 'error'; }).length;
       // Только количества — для проверки защиты от дублей (без сумм и имён).
       out.receipts = store.rows('receipts').length;
       out.ops_not_posted = store.rows('ops_log').filter(function (o) { return o.status !== 'posted'; }).length;

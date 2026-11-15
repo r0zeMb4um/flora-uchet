@@ -330,7 +330,17 @@ var Summary = (function () {
     return '﻿' + body;
   }
 
-  return { period: period, stock: stock, debtors: debtors, months: months, day: day, prevRange: prevRange, top: top,
+  /**
+   * Сколько ошибок записано в журнал audit за последние days суток (проверка здоровья).
+   * Строки журнала не удаляются, поэтому старые, уже исправленные ошибки так не «висят» вечно.
+   * now и ts — местное время Алматы вида 2026-11-11T15:55:04+05:00.
+   */
+  function recentErrors(auditRows, now, days) {
+    var since = new Date(Date.parse(now) - days * 86400000 + 5 * 3600000).toISOString().slice(0, 19);
+    return auditRows.filter(function (a) { return a.action === 'error' && String(a.ts).slice(0, 19) >= since; }).length;
+  }
+
+  return { recentErrors: recentErrors, period: period, stock: stock, debtors: debtors, months: months, day: day, prevRange: prevRange, top: top,
     restock: restock, pickups: pickups, exportTables: exportTables, toCsv: toCsv, safeCell: safeCell };
 })();
 
