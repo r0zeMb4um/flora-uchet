@@ -49,7 +49,7 @@ Telegram-бот + Mini App для управленческого учёта цв
 9. **Часовой пояс — `Asia/Almaty` (UTC+5).** Дата смены = дата открытия.
 10. **Персональные данные (этап 1):** только имена и короткая пометка у покупателей. Телефоны НЕ хранить (поле есть, но пустое).
 11. **Секреты:** токен бота и прочие ключи — только в Script Properties. Никогда в коде, в git или в чате.
-12. **Telegram:** вебхук отвечает через `HtmlService.createHtmlOutput()` (иначе ошибка 302). Mini App шлёт запросы с `Content-Type: text/plain`. Каждый запрос Mini App проверяет `initData` (HMAC-SHA-256, ключ `WebAppData`, `auth_date` не старше 12 часов) через `Utilities.computeHmacSha256Signature`.
+12. **Telegram:** вебхук отвечает через `HtmlService.createHtmlOutput()` (иначе ошибка 302). Mini App шлёт запросы с `Content-Type: text/plain`. Каждый запрос Mini App проверяет `initData` (HMAC-SHA-256, ключ `WebAppData`, `auth_date` не старше 24 часов — D47) через `Utilities.computeHmacSha256Signature`.
 13. **Клиент и точка** берутся из таблицы `staff` по проверенному Telegram ID, никогда из тела запроса.
 14. **Один `doPost`** на бота и Mini App. Вебхук проверяется ключом в адресе (`?k=` = `WEBHOOK_KEY` из Script Properties), весь обработчик Telegram в `try/catch` и всегда отвечает 200; повторы отсекаются по `LAST_UPDATE_ID`.
 15. **Развёртывание одно и то же:** `clasp deploy -i <DEPLOYMENT_ID>`, только через `npm run deploy`. Новое развёртывание меняет адрес и ломает бота и Mini App.

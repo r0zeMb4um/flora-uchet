@@ -3,12 +3,12 @@
  *   secret = HMAC_SHA256(key = "WebAppData", msg = токен бота)
  *   hash   = hex(HMAC_SHA256(key = secret, msg = data_check_string))
  * data_check_string — все поля, кроме hash, по алфавиту, «key=value» через перевод строки.
- * Срок жизни — 12 часов (решение ТЗ). Функция чистая: HMAC передаётся снаружи (Apps Script или Node).
+ * Срок жизни — 24 часа (D47: суточные смены; в ТЗ было 12). Функция чистая: HMAC передаётся снаружи (Apps Script или Node).
  */
 var Auth = (function () {
   'use strict';
 
-  var MAX_AGE_SEC = 12 * 3600;
+  var MAX_AGE_SEC = 24 * 3600;
 
   function authError(message) {
     var e = new Error(message);
@@ -41,7 +41,7 @@ var Auth = (function () {
     var expected = hmacHex(secret, dcs);
     if (!safeEqual(expected, String(f.hash).toLowerCase())) throw authError('Подпись Telegram не сошлась — откройте кассу из меню бота заново');
     var authDate = Number(f.auth_date);
-    if (!authDate || nowSec - authDate > MAX_AGE_SEC) throw authError('Вход в кассу устарел (больше 12 часов) — закройте и откройте её из бота');
+    if (!authDate || nowSec - authDate > MAX_AGE_SEC) throw authError('Вход в кассу устарел (больше суток) — закройте и откройте её из бота');
     var user;
     try { user = JSON.parse(f.user); } catch (e) { throw authError('Нет данных пользователя Telegram'); }
     if (!user || !user.id) throw authError('Нет данных пользователя Telegram');

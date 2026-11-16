@@ -41,8 +41,8 @@ test('initData: подделка, чужой токен, устаревший в
   assert.notEqual(forged, good);
   assert.throws(() => verify(forged), { code: 'AUTH' });
   assert.throws(() => verify(good, NOW, '999:other-bot'), { code: 'AUTH' });
-  assert.throws(() => verify(signedInitData({ user, auth_date: String(NOW - 12 * 3600 - 1) })), { code: 'AUTH' });
-  assert.equal(verify(signedInitData({ user, auth_date: String(NOW - 12 * 3600) })).user.id, 777);
+  assert.throws(() => verify(signedInitData({ user, auth_date: String(NOW - 24 * 3600 - 1) })), { code: 'AUTH' });
+  assert.equal(verify(signedInitData({ user, auth_date: String(NOW - 24 * 3600) })).user.id, 777);
   assert.throws(() => verify(''), { code: 'AUTH' });
   assert.throws(() => verify(signedInitData({ auth_date: String(NOW) })), { code: 'AUTH' });
 });
