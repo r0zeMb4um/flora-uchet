@@ -212,7 +212,7 @@
   /** Экран «Принято / Проведено» на секунду. Возвращает элементы, чтобы дописать «Проведено», когда сервер подтвердит. */
   function showDone(amount, line, already, pending) {
     var title = el('div', { class: 'done__title script', text: already ? 'Уже было проведено' : pending ? 'Принято' : 'Проведено' });
-    var note = el('div', { class: 'muted', text: pending ? 'отправляем…' : '' });
+    var note = el('div', { class: 'muted', text: pending ? 'сохранено на телефоне, отправляем в кассу…' : '' });
     var box = el('div', { class: 'done', role: 'status' }, [
       el('div', { class: 'done__check' }, [icon('check')]),
       title,
@@ -662,6 +662,14 @@
           retryTimer = setTimeout(pump, RETRY[Math.min(retryStep++, RETRY.length - 1)]);
           return;
         }
+        if (e.code === 'POSSIBLE_DUPLICATE') { // такая же продажа только что проведена (D46): спросить человека, ничего не записано
+          it.status = 'dup'; it.error = e.message; it.details = e.details || null;
+          saveMyQ(q2);
+          askDuplicate(it);
+          updateNet();
+          pump();
+          return;
+        }
         if (e.code === 'OP_FAILED' && (it.tries || 0) < 2) { // ночная проверка отменила зависшую операцию — оформляем под новым номером
           it.op_id = uuid(); it.tries = (it.tries || 0) + 1; it.status = 'pending'; saveMyQ(q2); pump(); return;
         }
@@ -675,16 +683,49 @@
       });
   }
 
+  /** Сервер нашёл такую же продажу за последние 30 минут (D46): это новая продажа или повтор? */
+  function askDuplicate(it) {
+    var yes = function () {
+      var q = myQ();
+      var x = q.filter(function (i) { return i.id === it.id; })[0];
+      if (!x) return;
+      x.payload = Object.assign({}, x.payload, { confirm_repeat: true });
+      x.status = 'pending';
+      saveMyQ(q);
+      pump();
+      toast('Проводим как новую продажу…');
+    };
+    var no = function () {
+      saveMyQ(myQ().filter(function (i) { return i.id !== it.id; }));
+      unapplyList([it]);
+      haptic('success');
+      toast('Повтор не проведён — в кассе одна такая продажа');
+      if (['main', 'stock', 'preorders', 'more', 'queue'].indexOf(state.screen) >= 0) render(); else updateNet();
+    };
+    var text = it.error + '\n\n«OK» — да, это ещё одна покупка. «Отмена» — это повтор, не проводить.';
+    if (tg && tg.showPopup) {
+      try {
+        tg.showPopup({ title: 'Похоже на повтор', message: String(it.error).slice(0, 250), buttons: [
+          { id: 'no', type: 'default', text: 'Повтор, не проводить' }, { id: 'yes', type: 'default', text: 'Это новая продажа' }] },
+        function (id) { if (id === 'yes') yes(); else if (id === 'no') no(); });
+        return;
+      } catch (e) { /* старый Telegram — обычный вопрос */ }
+    }
+    if (window.confirm(text)) yes(); else no();
+  }
+
   /** Полоска вверху: нет связи / отправляем / не проведено. */
   function updateNet() {
     var box = document.getElementById('net');
     if (!box) return;
     var failed = failedQ().length, pend = pendingQ().length;
+    var dups = myQ().filter(function (i) { return i.status === 'dup'; }).length;
     var text = '', cls = '';
     if (state.authExpired) { cls = 'net--bad'; text = 'Вход в кассу устарел — закройте её и откройте снова из бота. Продаж в очереди: ' + pend + '.'; }
     else if (failed) { cls = 'net--bad'; text = '⚠️ Не проведено продаж: ' + failed + ' — нажмите, чтобы разобраться'; }
+    else if (dups) { cls = 'net--bad'; text = '⚠️ Похоже на повтор продажи: ' + dups + ' — нажмите и выберите, проводить или нет'; }
     else if (pend && state.offline) { cls = 'net--off'; text = 'Нет связи — продаж сохранено: ' + pend + '. Отправятся сами, когда появится сеть.'; }
-    else if (pend) { cls = 'net--sync'; text = 'Отправляем продаж: ' + pend + '…'; }
+    else if (pend) { cls = 'net--sync'; text = 'Продажа сохранена, отправляем в кассу (' + pend + ')… Ещё раз не оформляйте — она не потеряется.'; }
     else if (state.offline && state.fromCache) { cls = 'net--off'; text = 'Нет связи — остатки на ' + new Date((state.cacheAt || Date.now()) + 5 * 3600000).toISOString().slice(11, 16) + '. Продажи сохранятся и отправятся сами.'; }
     else if (state.offline) { cls = 'net--off'; text = 'Нет связи. Продажи сохранятся на телефоне и отправятся сами.'; }
     else { box.hidden = true; return; }
@@ -777,11 +818,15 @@
       var card = el('div', { class: 'card' + (i.status === 'failed' ? ' card--note' : '') }, [
         el('div', { class: 'sum' }, [el('b', { text: (i.kind === 'bouquet' ? 'Букет' : 'Продажа') + ' · ' + when }), el('b', { class: 'num', text: money(i.total) })]),
         el('div', { class: 'muted', text: parts }),
-        i.status === 'failed'
+        i.status === 'dup'
+          ? el('div', { class: 'error', text: i.error + ' Пока не проведена.' })
+          : i.status === 'failed'
           ? el('div', { class: 'error', text: 'НЕ ПРОВЕДЕНА: ' + i.error + '. В кассу эта продажа не записана.' })
           : el('div', { class: 'muted', text: i.status === 'sending' ? 'Отправляется…' : state.offline ? 'Ждёт связи' : 'Ждёт отправки' })
       ]);
-      if (i.status === 'failed') {
+      if (i.status === 'dup') {
+        card.appendChild(el('button', { class: 'btn btn--primary', onclick: function () { askDuplicate(i); } }, [icon('help'), 'Решить: новая продажа или повтор']));
+      } else if (i.status === 'failed') {
         card.appendChild(el('button', { class: 'btn btn--primary', onclick: function () { restoreToDraft(i); } }, [icon('edit'), 'Исправить и провести заново']));
         card.appendChild(el('button', { class: 'btn', onclick: function () {
           if (!window.confirm('Убрать эту продажу? Она не записана в кассу, деньги по ней учитывать не нужно.')) return;
@@ -3574,6 +3619,7 @@
       payload: Object.assign({}, sm.payload, { shift_no: sh.shift_no })
     };
     var q = myQ();
+    if (q.some(function (i) { return i.op_id === item.op_id; })) return; // двойное нажатие «Провести»: эта продажа уже в очереди
     q.push(item);
     saveMyQ(q);
     if (!myQ().some(function (i) { return i.id === item.id; })) { // телефон не дал сохранить (например, приватный режим) — не обещаем того, чего нет

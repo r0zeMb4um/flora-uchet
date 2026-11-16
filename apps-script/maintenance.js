@@ -108,10 +108,11 @@ if (typeof module !== 'undefined' && module.exports) module.exports = Maintenanc
 var BACKUP_FOLDER = 'Флора·Учёт — резервные копии';
 var BACKUP_KEEP_DAYS = 30;
 
-/** Прогрев (D36): в рабочие часы раз в 5 минут «стучимся» в собственный адрес, чтобы скрипт не засыпал и кассу не ждали 5–7 секунд после паузы. */
+/**
+ * Прогрев (D36): раз в 5 минут «стучимся» в собственный адрес, чтобы скрипт не засыпал и кассу не ждали 5–7 секунд после паузы.
+ * Круглые сутки (D46): с суточными сменами (D42) продают и ночью. ≈ 288 запусков по 1–2 с — несколько минут из суточной квоты триггеров.
+ */
 function keepWarm() {
-  var hour = Number(nowIso().slice(11, 13));
-  if (hour < 8 || hour > 23) return;
   try { UrlFetchApp.fetch('https://script.google.com/macros/s/' + DEPLOYMENT_ID + '/exec?ping=' + Date.now(), { muteHttpExceptions: true, followRedirects: true }); } catch (e) { /* не страшно */ }
 }
 

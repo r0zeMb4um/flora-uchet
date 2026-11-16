@@ -52,6 +52,11 @@ function health_() {
       var audit = store.rows('audit');
       out.errors_logged = Summary.recentErrors(audit, nowIso(), 7);
       out.errors_total = audit.filter(function (a) { return a.action === 'error'; }).length;
+      // Скорость кассы за эту неделю: запросов, среднее и максимум в миллисекундах, сколько дольше 5 с (без имён и сумм).
+      try {
+        var perf = JSON.parse(PropertiesService.getScriptProperties().getProperty('PERF_' + Maintenance.weekKey(nowIso())) || 'null');
+        if (perf) out.speed_week = { requests: perf.n, avg_ms: perf.n ? Math.round(perf.sum / perf.n) : 0, max_ms: perf.max, slower_5s: perf.slow };
+      } catch (ignoreP) { /* не важно */ }
       // Только количества — для проверки защиты от дублей (без сумм и имён).
       out.receipts = store.rows('receipts').length;
       out.ops_not_posted = store.rows('ops_log').filter(function (o) { return o.status !== 'posted'; }).length;

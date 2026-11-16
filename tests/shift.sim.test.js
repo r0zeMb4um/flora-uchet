@@ -448,7 +448,7 @@ test('отмену предзаказа делает только владели
 test('один и тот же покупатель не задваивается по имени', () => {
   const w = world();
   openGolden(w);
-  const debt = (cust) => w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [], debt_customer: cust });
+  const debt = (cust) => w.post('s_anna', 'sale', { items: [{ item_id: 'kraft', qty: 1 }], price: 300, payments: [], debt_customer: cust, confirm_repeat: true });
   debt({ new_customer: { name: 'Айгуль', note: 'соседний магазин' } });
   assert.throws(() => debt({ new_customer: { name: 'айгуль' } }), (e) => e.code === 'SIMILAR_CUSTOMERS' && e.details.length === 1);
   debt({ customer_id: w.customerId('Айгуль') });
@@ -680,5 +680,30 @@ test('продажа из очереди, оформленная в другой
   assert.equal(w.view().stock('kraft'), 61, 'отказ ничего не записал');
   w.post('s_anna', 'sale', { ...sale, shift_no: no });
   assert.equal(w.view().stock('kraft'), 60);
-  w.post('s_anna', 'sale', sale); // старые клиенты без номера смены продолжают работать
+  w.post('s_anna', 'sale', { ...sale, confirm_repeat: true }); // старые клиенты без номера смены продолжают работать
+});
+
+test('защита от повтора продажи (D46): та же продажа за 30 минут — переспросить; другой состав, оплата или время — проводится', () => {
+  const w = world();
+  openGolden(w);
+  const sale = { items: [{ item_id: 'kraft', qty: 2 }], price: 600, payments: [{ method: 'cash', amount: 600 }] };
+  w.post('s_anna', 'sale', sale);
+  assert.throws(() => w.post('s_anna', 'sale', sale), (e) => e.code === 'POSSIBLE_DUPLICATE' && e.details.receipt_no >= 1 && /Это новая продажа\?/.test(e.message));
+  const before = w.store.tables.receipts.length;
+  assert.equal(w.store.tables.ops_log.filter((o) => o.status !== 'posted').length, 0, 'отказ ничего не записал — номер операции можно отправить снова');
+  // Другая оплата, другой состав, другой тип — не повтор.
+  w.post('s_anna', 'sale', { ...sale, payments: [{ method: 'card', amount: 600 }] });
+  w.post('s_anna', 'sale', { ...sale, items: [{ item_id: 'kraft', qty: 1 }, { item_id: 'kraft', qty: 1 }], price: 601, payments: [{ method: 'cash', amount: 601 }] });
+  w.post('s_anna', 'bouquet', sale);
+  assert.equal(w.store.tables.receipts.length, before + 3);
+  // Подтвердили «да, это новая продажа» — проводится.
+  w.post('s_anna', 'sale', { ...sale, confirm_repeat: true });
+  // Отменённый чек повтором не считается.
+  const last = w.store.tables.receipts[w.store.tables.receipts.length - 1];
+  w.post('s_anna', 'cancel', { receipt_id: last.receipt_id, reason: 'ошибка' });
+  assert.throws(() => w.post('s_anna', 'sale', sale), { code: 'POSSIBLE_DUPLICATE' }, 'есть ещё первый чек');
+  // Через 31 минуту после последней такой продажи — уже не спрашиваем.
+  const lastTwin = w.store.tables.receipts.filter((r) => r.type === 'sale' && r.total === 600 && r.status === 'posted').map((r) => r.created_at).sort().pop();
+  const later = new Date(Date.parse(lastTwin) + 31 * 60000 + 5 * 3600000).toISOString().replace('Z', '+05:00').replace('.000', '');
+  w.post('s_anna', 'sale', sale, { ctx: { client_id: CLIENT, point_id: POINT, staff_id: 's_anna', role: 'florist', now: later } });
 });

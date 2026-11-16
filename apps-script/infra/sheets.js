@@ -42,9 +42,12 @@ var SheetsStore = (function () {
       });
     }
 
+    var sheets = {};
+    /** Лист по имени (один вызов Google на лист за запуск). Заголовки новых колонок дописываются только перед записью. */
     function sheetOf(name) {
+      if (sheets[name]) return sheets[name];
       var sh = ss.getSheetByName(name);
-      if (sh) { ensureHeaders(sh, name); return sh; }
+      if (sh) { sheets[name] = sh; return sh; }
       // Новый лист из схемы (появился в новой версии) создаётся сам: заголовки, текстовые форматы, защита.
       var cols = Schema.SHEETS[name];
       if (!cols) throw new Error('Нет листа ' + name + ' — запустите setup()');
@@ -57,6 +60,13 @@ var SheetsStore = (function () {
         if (c.type === 'n') range.setNumberFormat('0');
       });
       try { var pr = sh.protect().setDescription('Пишет только бот'); pr.removeEditors(pr.getEditors()); } catch (e) { /* защита не обязательна для работы */ }
+      checked[name] = true;
+      sheets[name] = sh;
+      return sh;
+    }
+    function sheetForWrite(name) {
+      var sh = sheetOf(name);
+      ensureHeaders(sh, name);
       return sh;
     }
 
@@ -79,15 +89,14 @@ var SheetsStore = (function () {
       if (memo[name]) return memo[name];
       var cols = Schema.SHEETS[name];
       var sh = sheetOf(name);
-      var last = sh.getLastRow();
+      // Один вызов Google на лист: весь заполненный диапазон (строка 1 — заголовки). Колонок может быть меньше схемы,
+      // если новая колонка ещё не дописана в старый лист, — тогда значение пустое.
+      var values = sh.getDataRange().getValues();
       var out = [];
-      if (last >= 2) {
-        var values = sh.getRange(2, 1, last - 1, cols.length).getValues();
-        for (var i = 0; i < values.length; i++) {
-          var obj = { _row: i + 2 };
-          for (var j = 0; j < cols.length; j++) obj[cols[j].name] = fromCell(values[i][j], cols[j].type);
-          out.push(obj);
-        }
+      for (var i = 1; i < values.length; i++) {
+        var obj = { _row: i + 1 };
+        for (var j = 0; j < cols.length; j++) obj[cols[j].name] = fromCell(j < values[i].length ? values[i][j] : '', cols[j].type);
+        out.push(obj);
       }
       memo[name] = out;
       return out;
@@ -114,8 +123,9 @@ var SheetsStore = (function () {
         var headers = Schema.headers(name);
         rows.forEach(function (r) { Schema.check(name, r); });
         var values = rows.map(function (r) { return headers.map(function (h) { return toCell(r[h]); }); });
-        var sh = sheetOf(name);
-        var start = sh.getLastRow() + 1;
+        var sh = sheetForWrite(name);
+        // Лист уже прочитан в этом запуске — первая свободная строка известна без лишнего вызова Google.
+        var start = inLock && memo[name] ? memo[name].length + 2 : sh.getLastRow() + 1; // вне блокировки — только свежий номер строки
         sh.getRange(start, 1, values.length, headers.length).setValues(values);
         touched();
         var cached = load(name);
@@ -128,7 +138,7 @@ var SheetsStore = (function () {
       update: function (name, match, set) {
         Schema.check(name, set);
         var headers = Schema.headers(name);
-        var sh = sheetOf(name);
+        var sh = sheetForWrite(name);
         load(name).forEach(function (r) {
           if (!matches(r, match)) return;
           Object.keys(set).forEach(function (k) { r[k] = set[k]; });
@@ -162,3 +172,5 @@ var SheetsStore = (function () {
 
   return { open: open, create: create };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = SheetsStore;

@@ -333,6 +333,15 @@ var Ops = (function () {
         customerId = customerRef(view, plan, p.debt_customer);
       }
       C.checkReceiptBalance(r.total, pays, debt, 0);
+      // Защита от повтора (D46): та же продажа тем же человеком в этой смене за последние 30 минут —
+      // переспросить. Повтор с тем же op_id сюда не доходит (Posting отвечает «уже проведено»).
+      if (p.confirm_repeat !== true) {
+        var twin = recentTwin(view, shift, type, items, r.total, pays, debt, customerId);
+        if (twin) {
+          throw opsError('POSSIBLE_DUPLICATE', 'Такая же продажа на ' + tenge(r.total) + ' уже проведена в ' + String(twin.created_at).slice(11, 16) +
+            ' (чек №' + twin.receipt_no + '). Это новая продажа?', { receipt_no: twin.receipt_no, at: twin.created_at, total: r.total });
+        }
+      }
       var receiptId = 'rc-' + plan.op_id;
       add(plan, view, 'receipts', {
         receipt_id: receiptId, receipt_no: receiptNo(view, shift.shift_id), shift_id: shift.shift_id, type: type,
@@ -352,6 +361,32 @@ var Ops = (function () {
       plan.result = { receipt_id: receiptId, total: r.total, debt: debt };
     };
   }
+  var TWIN_WINDOW_MS = 30 * 60000;
+  /** Проведённый чек этой смены с тем же составом, суммой, оплатой и автором за последние 30 минут (D46). */
+  function recentTwin(view, shift, type, items, total, pays, debt, customerId) {
+    var now = Date.parse(view.ctx.now);
+    var want = {};
+    items.forEach(function (l) { want[l.item_id] = (want[l.item_id] || 0) + Number(l.qty); });
+    var wantKey = Object.keys(want).sort().map(function (k) { return k + ':' + want[k]; }).join('|');
+    var payKey = function (list) { return list.map(function (x) { return x.method + ':' + x.amount; }).sort().join('|'); };
+    var wantPay = payKey(pays);
+    var cands = view.rows('receipts').filter(function (rc) {
+      return rc.shift_id === shift.shift_id && rc.status === 'posted' && rc.type === type && rc.total === total &&
+        (rc.debt_amount || 0) === debt && String(rc.customer_id || '') === String(customerId || '') && rc.created_by === view.ctx.staff_id &&
+        now - Date.parse(rc.created_at) >= 0 && now - Date.parse(rc.created_at) <= TWIN_WINDOW_MS;
+    });
+    if (!cands.length) return null;
+    var moves = view.rows('stock_moves');
+    var paysAll = view.rows('payments');
+    return cands.filter(function (rc) {
+      var got = {};
+      moves.forEach(function (m) { if (m.receipt_id === rc.receipt_id && m.type === 'sale') got[m.item_id] = (got[m.item_id] || 0) - m.qty; });
+      var gotKey = Object.keys(got).sort().map(function (k) { return k + ':' + got[k]; }).join('|');
+      var gotPay = payKey(paysAll.filter(function (x) { return x.receipt_id === rc.receipt_id && x.kind === 'sale'; }));
+      return gotKey === wantKey && gotPay === wantPay;
+    }).sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1; })[0] || null;
+  }
+
   H.sale = saleLike('sale');
   H.bouquet = saleLike('bouquet');
 

@@ -55,12 +55,12 @@ test('выгрузка: текст, похожий на формулу (= + - @)
 
 test('журнал операций: у проведённой операции план очищен, у зависшей — сохранён для дописывания', () => {
   const { store, anna, post } = shop();
-  post(anna, 'sale', { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [{ method: 'cash', amount: 1200 }] });
+  post(anna, 'sale', { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [{ method: 'cash', amount: 1200 }], confirm_repeat: true });
   const done = store.rows('ops_log').filter((o) => o.status === 'posted' && o.kind === 'sale');
   assert.equal(done.length, 1);
   assert.equal(done[0].plan_json, '');
   assert.ok(done[0].result_json.includes('total'));
-  assert.throws(() => Posting.post(store, anna, { op_id: 'op-crash-0000001', kind: 'sale', payload: { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [{ method: 'cash', amount: 1200 }] } },
+  assert.throws(() => Posting.post(store, anna, { op_id: 'op-crash-0000001', kind: 'sale', payload: { items: [{ item_id: 'rose', qty: 1 }], price: 1200, payments: [{ method: 'cash', amount: 1200 }], confirm_repeat: true } },
     { step: (name) => { if (name === 'facts:receipts') throw new Error('обрыв'); } }));
   const pending = store.rows('ops_log').find((o) => o.op_id === 'op-crash-0000001');
   assert.equal(pending.status, 'pending');
