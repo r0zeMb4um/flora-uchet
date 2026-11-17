@@ -1127,8 +1127,9 @@
       var soon = orders.filter(function (o) { return o.pickup_date === today || o.pickup_date === tomorrow; }).length;
       var low = d.catalog.filter(function (c) { return c.stock < c.min; });
       nodes.push(el('div', { class: 'grid2' }, [
-        el('div', { class: 'card card--accent' }, [icon('chart-line'), el('div', { class: 'muted', text: 'Выручка смены' }),
-          numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count + (s.refunds > 0 ? ' · возвраты −' + money(s.refunds) : '') })]),
+        el('button', { class: 'card card--accent btn--tile', style: 'font:inherit;color:inherit;cursor:pointer;text-align:left', onclick: function () { openScreen('shift_receipts'); } }, [
+          icon('chart-line'), el('div', { class: 'muted', text: 'Выручка смены' }),
+          numEl(s.revenue, true), el('div', { class: 'muted', text: 'чеков: ' + s.receipts_count + (s.refunds > 0 ? ' · возвраты −' + money(s.refunds) : '') + ' · смотреть ›' })]),
         s.my_pay ? el('div', { class: 'card' }, [icon('wallet'), el('div', { class: 'muted', text: 'Мой заработок' }),
           numEl(s.my_pay.total, true),
           el('div', { class: 'muted num', text: money(s.my_pay.rate) + ' + ' + money(s.my_pay.pct) }),
@@ -1163,6 +1164,7 @@
       el('h1', { class: 'h1', text: 'Ещё' }),
       head('Чеки и деньги'),
       el('div', { class: 'grid2' }, [
+        el('button', { class: 'btn btn--tile btn--wide', onclick: go('shift_receipts') }, [icon('receipt'), 'Чеки смены']),
         el('button', { class: 'btn btn--tile', onclick: go('refund') }, [icon('receipt-refund'), 'Возврат']),
         el('button', { class: 'btn btn--tile', onclick: go('cancel') }, [icon('receipt-off'), 'Отмена продажи']),
         el('button', { class: 'btn btn--tile', onclick: go('cashout') }, [icon('cash-banknote'), 'Расход']),
@@ -2050,6 +2052,65 @@
       el('button', { class: 'btn', onclick: function () { f.receipt = null; render(); } }, 'Другой чек')
     );
     upd();
+  };
+
+  // ---------- чеки смены (D48): посмотреть, записалась ли продажа ----------
+  SCREENS.shift_receipts = function () {
+    backButton(true);
+    mainButton(null);
+    var f = state.form;
+    if (!f.data) {
+      app.replaceChildren(title('Чеки смены', 'Загружаем…'), skeleton('list'));
+      api({ action: 'shift_receipts' }).then(function (d) { f.data = d; render(); })
+        .catch(function (e) { f.error = e.message || 'Нет связи'; f.data = { shift_no: null, receipts: [] }; render(); });
+      return;
+    }
+    var d = f.data;
+    var q = (f.q || '').replace(/\D/g, '');
+    var nodes = [title(d.shift_no ? 'Чеки смены №' + d.shift_no : 'Чеки смены', 'Всё, что записано в кассу за эту смену. Прежде чем оформлять продажу заново — найдите её здесь.')];
+    if (f.error) nodes.push(el('div', { class: 'error', text: f.error + ' — показать чеки не получилось. Попробуйте ещё раз.' }));
+    // Продажи, которые ещё на телефоне: они уже приняты кассой и уйдут сами.
+    var waiting = myQ();
+    if (waiting.length) {
+      nodes.push(el('div', { class: 'card card--note' }, [el('b', { text: 'Ещё отправляются: ' + waiting.length }),
+        el('div', { class: 'muted', text: 'Эти продажи сохранены на телефоне и попадут в список сами. Заново их не оформляйте.' })]
+        .concat(waiting.map(function (i) {
+          return el('div', { class: 'sum' }, [el('span', { text: i.payload.items.map(function (x) { return nameOf(x.item_id) + ' ×' + x.qty; }).join(', ') }),
+            el('b', { class: 'num', text: money(i.total) })]);
+        }))));
+    }
+    if (d.shift_no === null && !f.error) nodes.push(emptyState('Смена не открыта', 'Чеки появятся, когда откроете смену и проведёте первую продажу.'));
+    else if (!d.receipts.length && !f.error) nodes.push(emptyState('Чеков пока нет', 'Первая проведённая продажа появится здесь.'));
+    else if (d.receipts.length) {
+      var search = el('input', { class: 'search', type: 'search', inputmode: 'numeric', placeholder: 'Найти по сумме, например 7000', value: f.q || '',
+        oninput: function (e) { f.q = e.target.value; render(); var s = document.querySelector('.search'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } } });
+      nodes.push(search);
+      var shown = d.receipts.filter(function (r) { return !q || String(r.total).indexOf(q) >= 0; });
+      if (!shown.length) nodes.push(emptyState('Не нашли', 'Чека на такую сумму в этой смене нет.'));
+      shown.forEach(function (r) {
+        var cancelled = r.status === 'cancelled';
+        var pay = [r.cash ? 'нал ' + money(r.cash) : '', r.card ? 'безнал ' + money(r.card) : '', r.debt ? 'в долг ' + money(r.debt) : '',
+          r.discount ? 'скидка ' + money(r.discount) : '', r.refunded ? 'возврат ' + money(r.refunded) : ''].filter(Boolean).join(' · ');
+        var kind = { sale: 'продажа', bouquet: 'букет', preorder: 'предзаказ' }[r.type] || r.type;
+        var card = el('div', { class: 'card' + (cancelled ? ' card--note' : '') }, [
+          el('div', { class: 'sum' }, [el('b', { text: '№' + r.receipt_no + ' · ' + r.time + ' · ' + kind + (cancelled ? ' · ОТМЕНЁН' : '') }),
+            el('b', { class: 'num', text: money(r.total) })]),
+          r.items.length ? el('div', { text: r.items.map(function (x) { return x.name + ' ×' + x.qty; }).join(', ') }) : null,
+          el('div', { class: 'muted num', text: [pay, r.by].filter(Boolean).join(' · ') })
+        ]);
+        if (!cancelled && (r.type === 'sale' || r.type === 'bouquet') && r.items.length) {
+          card.appendChild(el('button', { class: 'btn btn--mini', onclick: function () {
+            var how = r.debt ? (r.cash || r.card ? 'частично в долг' : 'в долг') : r.cash && r.card ? 'нал + безнал' : r.card ? 'безналом' : 'наличными';
+            var sale = { shop: state.data.shop || 'Флора·Учёт', type: r.type, how: how, total: r.total, discount: r.discount, items: r.items,
+              when: new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10).split('-').reverse().join('.') + ' · ' + r.time };
+            shareImage(function () { return drawReceipt(sale); }, 'Чек для покупателя · ' + money(r.total), 'Чек пришёл вам в чат с ботом — перешлите клиенту');
+          } }, [icon('photo'), 'Чек клиенту картинкой']));
+        }
+        nodes.push(card);
+      });
+    }
+    nodes.push(el('button', { class: 'btn', onclick: function () { f.data = null; f.error = null; render(); } }, [icon('refresh'), 'Обновить']));
+    app.replaceChildren.apply(app, nodes);
   };
 
   // ---------- возврат ----------

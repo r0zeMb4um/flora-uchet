@@ -144,6 +144,46 @@ var MiniApi = (function () {
       .slice(0, 100);
   }
 
+  /**
+   * «Чеки смены» для флориста (D48): все чеки ОТКРЫТОЙ смены, новые сверху, с составом и оплатой — только просмотр.
+   * Нужен, чтобы перед повторным вводом проверить, записалась ли продажа. Расчётную кассу не показывает (пересчёт вслепую):
+   * итогов по наличным здесь нет, только сами чеки.
+   */
+  function shiftReceipts(store, staff, now) {
+    var view = Ops.makeView(store, ctxOf(staff, now));
+    var shift = view.openShift();
+    if (!shift) return { shift_no: null, receipts: [] };
+    var onShift = view.shiftStaff(shift.shift_id).some(function (s) { return s.staff_id === staff.staff_id; });
+    if (!onShift && staff.role !== 'owner') throw apiError('NOT_ON_SHIFT', 'Вы не работаете в открытой смене');
+    var itemName = {};
+    view.rows('catalog').forEach(function (c) { itemName[c.item_id] = c.name; });
+    var staffName = {};
+    view.rows('staff').forEach(function (s) { staffName[s.staff_id] = s.name; });
+    var mine = view.rows('receipts').filter(function (r) { return r.shift_id === shift.shift_id; });
+    var ids = {};
+    mine.forEach(function (r) { ids[r.receipt_id] = { items: {}, cash: 0, card: 0, refunded: 0 }; });
+    view.rows('stock_moves').forEach(function (m) {
+      var x = ids[m.receipt_id];
+      if (x && m.type === 'sale') x.items[m.item_id] = (x.items[m.item_id] || 0) - m.qty;
+    });
+    view.rows('payments').forEach(function (p) {
+      var x = ids[p.receipt_id];
+      if (!x) return;
+      if (p.kind === 'refund') x.refunded += p.amount;
+      else if (p.method === 'cash') x.cash += p.amount; else x.card += p.amount;
+    });
+    var receipts = mine.map(function (r) {
+      var x = ids[r.receipt_id];
+      return {
+        receipt_no: r.receipt_no, time: String(r.created_at).slice(11, 16), type: r.type, status: r.status,
+        price: r.price, discount: r.discount_amount, total: r.total, debt: r.debt_amount || 0,
+        cash: x.cash, card: x.card, refunded: x.refunded, by: staffName[r.created_by] || '',
+        items: Object.keys(x.items).filter(function (k) { return x.items[k] > 0; })
+          .map(function (k) { return { name: itemName[k] || k, qty: x.items[k] }; })
+      };
+    }).sort(function (a, b) { return b.receipt_no - a.receipt_no; });
+    return { shift_no: shift.shift_no, receipts: receipts };
+  }
 
   // ---------- экраны владелицы (этап G) ----------
 
@@ -368,6 +408,7 @@ var MiniApi = (function () {
     }
     if (body.action === 'schedule') return { data: scheduleMonth(store, staff, now, String(body.month || '')), notify: [] };
     if (body.action === 'receipts') return { data: recentReceipts(store, staff, now, Math.min(Number(body.days) || 7, 31)), notify: [] };
+    if (body.action === 'shift_receipts') return { data: shiftReceipts(store, staff, now), notify: [] };
     if (body.action === 'close_preview') {
       // Только ПОСЛЕ ввода пересчёта: расхождение, зарплата, сколько можно забрать. Ничего не пишет.
       if (staff.role !== 'florist' && !ownerWorks(staff)) throw apiError('FORBIDDEN', 'Смену закрывает флорист');
@@ -415,7 +456,7 @@ var MiniApi = (function () {
 
   // ---------- кэш чтения (D36): таблица не читается, если с прошлого раза ничего не записывали ----------
 
-  var READ_CACHED = { bootstrap: 1, schedule: 1, receipts: 1, owner_today: 1, owner_shifts: 1, owner_shift: 1, owner_period: 1,
+  var READ_CACHED = { bootstrap: 1, schedule: 1, receipts: 1, shift_receipts: 1, owner_today: 1, owner_shifts: 1, owner_shift: 1, owner_period: 1,
     owner_customers: 1, owner_catalog: 1, owner_team: 1, owner_expenses: 1, owner_settings: 1 };
   var CACHE_TTL = 300; // секунд: страховка на случай записи в обход блокировки и смены даты
   var CACHE_MAX = 90000; // предел одной записи в кэше Google — 100 КБ

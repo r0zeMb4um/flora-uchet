@@ -296,3 +296,24 @@ test('владелица внесла в кассу (D45): плюс к расч�
   assert.equal(per.revenue, 6000);
   assert.throws(() => post(1, 'deposit', { amount: 1000 }), { code: 'NO_OPEN_SHIFT' }, 'без открытой смены внесение не записать');
 });
+
+test('«Чеки смены» для флориста (D48): все чеки открытой смены с составом и оплатой, отменённые помечены, без расчётной кассы', () => {
+  const { store, now } = shop();
+  let n = 0;
+  const post = (tg, kind, payload) => MiniApi.dispatch(store, tg, { action: 'post', kind, op_id: 'op-shr-' + String(++n).padStart(6, '0'), payload }, now);
+  const get = (tg) => MiniApi.dispatch(store, tg, { action: 'shift_receipts' }, now).data;
+  post(777, 'sale', { items: [{ item_id: 'rose', qty: 3 }], price: 3600, payments: [{ method: 'cash', amount: 3600 }] });
+  const second = post(777, 'bouquet', { items: [{ item_id: 'rose', qty: 5 }], price: 7000, discount: { kind: 'amount', value: 500 }, payments: [{ method: 'card', amount: 6500 }] });
+  post(777, 'cancel', { receipt_id: second.data.result.receipt_id, reason: 'ошибка' });
+  const d = get(777);
+  assert.equal(d.shift_no, 1);
+  assert.deepEqual(d.receipts.map((r) => [r.receipt_no, r.type, r.total, r.status]), [[2, 'bouquet', 6500, 'cancelled'], [1, 'sale', 3600, 'posted']], 'новые сверху, отменённый виден');
+  assert.deepEqual(d.receipts[1].items, [{ name: 'Роза', qty: 3 }]);
+  assert.equal(d.receipts[1].cash, 3600);
+  assert.equal(d.receipts[0].card, 6500);
+  assert.equal(d.receipts[0].discount, 500);
+  assert.equal(d.receipts[1].by, 'Анна');
+  assert.ok(!('calc_cash' in d) && !JSON.stringify(d).includes('calc_cash'), 'расчётной кассы нет');
+  assert.ok(get(1).receipts.length === 2, 'владелица тоже может посмотреть');
+  assert.throws(() => MiniApi.dispatch(store, 555, { action: 'shift_receipts' }, now), { code: 'FORBIDDEN' }, 'отключённый сотрудник — нет');
+});
